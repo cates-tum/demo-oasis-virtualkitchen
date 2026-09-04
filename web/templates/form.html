@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Run a grilling experiment</h1>
+<p class="sub">Grilling bench &rarr; red meat. Fields come live from pseudo-oasis's
+<code>{{ schema_type }}</code> schema.</p>
+
+<p class="crumbs">Bench: <strong>Grilling</strong> &nbsp;/&nbsp; Type: <strong>Red meat</strong>
+<span class="note">(other benches/types not wired yet)</span></p>
+
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+{% if fields %}
+<form method="post" action="/run">
+  <div>
+    <label for="nickname">Nickname <span class="note">(shown as submitter)</span></label>
+    <input type="text" id="nickname" name="nickname" value="{{ nickname }}" placeholder="e.g. chef_sam">
+  </div>
+
+  {% for f in fields %}
+  <div>
+    <label for="{{ f.name }}">{{ f.label }}{% if f.required %} <span class="req">*</span>{% endif %}</label>
+    {% if f.widget == "slider" %}
+      <input type="range" id="{{ f.name }}" name="{{ f.name }}"
+             min="{{ f.min }}" max="{{ f.max }}" step="{{ f.step }}" value="{{ f.value }}"
+             oninput="this.nextElementSibling.textContent = this.value">
+      <span class="rangeval">{{ f.value }}</span>
+    {% elif f.widget == "select" %}
+      <select id="{{ f.name }}" name="{{ f.name }}">
+        {% for opt in f.options %}
+        <option value="{{ opt }}"{% if opt == f.value %} selected{% endif %}>{{ opt }}</option>
+        {% endfor %}
+      </select>
+    {% elif f.widget == "number" %}
+      <input type="number" id="{{ f.name }}" name="{{ f.name }}" value="{{ f.value }}"
+             {% if f.required %}required{% endif %}>
+    {% else %}
+      <input type="text" id="{{ f.name }}" name="{{ f.name }}" value="{{ f.value }}"
+             {% if f.datalist %}list="{{ f.name }}_list"{% endif %} {% if f.required %}required{% endif %}>
+      {% if f.datalist %}
+      <datalist id="{{ f.name }}_list">
+        {% for opt in f.datalist %}<option value="{{ opt }}">{% endfor %}
+      </datalist>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <button type="submit">Run experiment</button>
+</form>
+{% endif %}
+{% endblock %}

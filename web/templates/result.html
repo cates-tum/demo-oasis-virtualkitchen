@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %} &middot; result{% endblock %}
+{% block content %}
+<h1>Experiment pushed</h1>
+<p class="sub">{{ entry.title }}</p>
+
+<h2 style="font-size:1.1rem">Outcome</h2>
+<table>
+  <tr><th>doneness</th><td>{{ outcome.doneness }}</td></tr>
+  <tr><th>char_level</th><td>{{ outcome.char_level }} / 100</td></tr>
+  <tr><th>juiciness_score</th><td>{{ outcome.juiciness_score }} / 100</td></tr>
+  <tr><th>food_safety_score</th><td>{{ outcome.food_safety_score }} / 100</td></tr>
+  <tr><th>quality_score</th><td>{{ outcome.quality_score }} / 100</td></tr>
+</table>
+
+<p class="note">
+  food_safety_score is a logistic curve centred on the ~{{ safe_temp }}&deg;C USDA
+  minimum safe internal temp for red meat. An internal temp of
+  {{ inputs.internal_temp_celsius }}&deg;C
+  {% if outcome.food_safety_score < 50 %}sits below that reference, so the score is low by design.
+  {% else %}clears that reference.{% endif %}
+</p>
+
+<h2 style="font-size:1.1rem">Inputs</h2>
+<table>
+  {% for k, v in inputs.items() if k != "outcome" %}
+  <tr><th>{{ k }}</th><td>{{ v }}</td></tr>
+  {% endfor %}
+</table>
+
+<p>
+  <a class="button" href="{{ entry_url }}" target="_blank" rel="noopener">
+    <button type="button">View entry in pseudo-oasis</button>
+  </a>
+  <span class="note">entry id {{ entry.id }}</span>
+</p>
+<p class="note">pseudo-oasis has no explorer UI yet, so this opens the raw entry JSON.</p>
+
+<p><a href="/">&larr; Run another</a></p>
+{% endblock %}

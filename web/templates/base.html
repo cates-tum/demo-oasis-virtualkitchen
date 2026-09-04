@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>virtual-kitchen{% block title %}{% endblock %}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 0; background: Canvas; color: CanvasText; }
+  main { max-width: 640px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  .sub { color: GrayText; margin: 0 0 1.5rem; }
+  form > div { margin-bottom: 1.1rem; }
+  label { display: block; font-weight: 600; margin-bottom: .3rem; }
+  label .req { color: #c0392b; }
+  input[type=text], input[type=number], select { width: 100%; padding: .5rem; font: inherit;
+    box-sizing: border-box; border: 1px solid GrayText; border-radius: 6px; background: Field; color: FieldText; }
+  input[type=range] { width: 100%; }
+  .rangeval { font-variant-numeric: tabular-nums; color: GrayText; }
+  button { font: inherit; font-weight: 600; padding: .6rem 1.2rem; border: 0; border-radius: 6px;
+    background: #2d7d46; color: #fff; cursor: pointer; }
+  .error { background: #fdecea; color: #611a15; border: 1px solid #f5c6cb; padding: .75rem 1rem;
+    border-radius: 6px; margin-bottom: 1.25rem; }
+  .crumbs { color: GrayText; font-size: .9rem; margin-bottom: 1rem; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid GrayText; }
+  .note { color: GrayText; font-size: .9rem; }
+  a.button { display: inline-block; text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>
