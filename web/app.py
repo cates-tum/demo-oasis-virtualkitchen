@@ -15,16 +15,14 @@ from engine import generator
 SCHEMA_TYPE = "grill_red_meat"
 NICK_COOKIE = "vk_nick"
 
-# Local UI hints only: slider bounds, dropdown options, datalists. These are
-# widget ergonomics, not field definitions. Field names / types / required
-# come from pseudo-oasis at request time. `heat_source` options are hardcoded
-# because that allowed-value list lives in a YAML comment and is not exposed
-# by GET /schemas (implementation finding, see README).
+# Local UI hints only: slider bounds and datalists. These are widget
+# ergonomics, not field definitions. Field names / types / required / enum
+# come from pseudo-oasis at request time. A field with an `enum` in the schema
+# renders as a dropdown of those values with no hint needed here.
 HINTS = {
     "internal_temp_celsius": {"widget": "slider", "min": 40, "max": 90, "step": 0.5, "default": 60},
     "duration_minutes": {"widget": "slider", "min": 1, "max": 120, "step": 1, "default": 20},
     "temperature_celsius": {"widget": "slider", "min": 100, "max": 300, "step": 5, "default": 220},
-    "heat_source": {"widget": "select", "options": ["grill", "pan", "oven"], "default": "grill"},
     "cooking_method": {"widget": "text", "datalist": ["grilling", "searing", "roasting"], "default": "grilling"},
     "cuisine": {"widget": "text", "datalist": ["Argentine", "American", "French", "Korean", "Turkish"], "default": ""},
 }
@@ -42,10 +40,14 @@ def _fields_for_form(values):
         if name in generator.SKIP_FIELDS:
             continue
         hint = HINTS.get(name, {})
-        widget = hint.get("widget") or ("number" if field["type"] == "number" else "text")
+        enum = field.get("enum")
+        if enum:
+            widget = "select"
+        else:
+            widget = hint.get("widget") or ("number" if field["type"] == "number" else "text")
         current = values.get(name)
         if current in (None, ""):
-            current = hint.get("default", "")
+            current = hint.get("default") or (enum[0] if enum else "")
         descriptors.append({
             "name": name,
             "label": name.replace("_", " ").capitalize(),
@@ -54,7 +56,7 @@ def _fields_for_form(values):
             "min": hint.get("min"),
             "max": hint.get("max"),
             "step": hint.get("step"),
-            "options": hint.get("options"),
+            "options": enum or hint.get("options"),
             "datalist": hint.get("datalist"),
             "value": current,
         })

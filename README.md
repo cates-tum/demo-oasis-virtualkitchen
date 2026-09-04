@@ -77,11 +77,15 @@ get right.
 - `pseudo-oasis` has no explorer UI yet, so the result page links to the raw
   entry JSON at `GET /entries/{id}`. Swap for a real explorer URL when one
   exists.
-- `heat_source` allowed values (`grill`, `pan`, `oven`) live in a YAML comment
-  in `pseudo-oasis/schemas/grill_red_meat.yaml`, which `GET /schemas` does not
-  expose. They are hardcoded as a UI hint here. If allowed-value lists should
-  drive the form, the platform schema needs a machine-readable `enum`.
 - `ingredients` (list type) is not collected in slice one.
+
+Resolved:
+
+- `heat_source` allowed values are now a machine-readable `enum` in
+  `GET /schemas` (`field.enum = [grill, pan, oven]`). The form reads them
+  straight from the fetched schema and renders a dropdown; no UI hint. An
+  out-of-range value is rejected by `pseudo-oasis` with 422, which the form
+  surfaces as an error the same way a missing required field does.
 
 ## Docker
 

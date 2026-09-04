@@ -54,6 +54,7 @@ def get_schema_fields(schema_type):
                 "name": fname,
                 "type": spec.get("type", "string"),
                 "required": bool(spec.get("required")),
+                "enum": spec.get("enum"),
             }
             if fname in known:  # child overrides parent
                 fields = [item if f["name"] == fname else f for f in fields]
@@ -96,4 +97,7 @@ if __name__ == "__main__":
     assert "outcome" in names, names
     req = {f["name"] for f in fields if f["required"]}
     assert req == {"cuisine", "cooking_method", "internal_temp_celsius", "heat_source"}, req
+    by_name = {f["name"]: f for f in fields}
+    assert by_name["heat_source"]["enum"] == ["grill", "pan", "oven"], by_name["heat_source"]
+    assert by_name["cuisine"]["enum"] is None
     print("client self-check ok:", names)
