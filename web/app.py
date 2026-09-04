@@ -177,20 +177,20 @@ def _result_note(schema_type, outcome, inputs):
     return None
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse, name="index")
 def index(request: Request):
     cards = [{"schema_type": st, **BENCHES[st]} for st in BENCHES
              if st in generator.OUTCOME_FORMULAS]
     return templates.TemplateResponse(request, "index.html", {"cards": cards})
 
 
-@app.get("/form/{schema_type}", response_class=HTMLResponse)
+@app.get("/form/{schema_type}", response_class=HTMLResponse, name="form")
 def form(request: Request, schema_type: str):
     _require_wired(schema_type)
     return _render_form(request, schema_type, values={})
 
 
-@app.post("/run/{schema_type}", response_class=HTMLResponse)
+@app.post("/run/{schema_type}", response_class=HTMLResponse, name="run")
 async def run(request: Request, schema_type: str, nickname: str = Form("")):
     _require_wired(schema_type)
     body = await request.form()

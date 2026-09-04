@@ -38,6 +38,19 @@ cp .env.example .env            # edit if pseudo-oasis is not on localhost:8000
 
 Then open http://localhost:8001.
 
+### Behind a reverse proxy path prefix
+
+If this app is served behind a proxy that strips a path prefix (e.g. Caddy's
+`handle_path /kitchen/*` forwarding to this app at root), pass that prefix as
+`--root-path` so generated links include it:
+
+```bash
+.venv/bin/uvicorn web.app:app --port 8001 --root-path "${ROOT_PATH:-}"
+```
+
+Set `ROOT_PATH=/kitchen` in the deploy environment; leave it unset for plain
+local dev, where links generate with no prefix as before.
+
 ## Layout
 
 ```

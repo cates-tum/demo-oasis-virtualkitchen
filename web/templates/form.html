@@ -30,7 +30,7 @@
 {% endmacro %}
 
 {% block content %}
-<p class="crumbs"><a href="/">&larr; Benches</a></p>
+<p class="crumbs"><a href="{{ url_for('index') }}">&larr; Benches</a></p>
 <h1>Run a {{ bench|lower }} experiment</h1>
 <p class="sub">{{ bench }} bench &rarr; {{ type_label|lower }}. Fields come live from
 pseudo-oasis's <code>{{ schema_type }}</code> schema.</p>
@@ -40,7 +40,7 @@ pseudo-oasis's <code>{{ schema_type }}</code> schema.</p>
 {% if fields %}
 {% set general = fields | selectattr("inherited") | list %}
 {% set specific = fields | rejectattr("inherited") | list %}
-<form method="post" action="/run/{{ schema_type }}">
+<form method="post" action="{{ url_for('run', schema_type=schema_type) }}">
   <fieldset>
     <legend>General</legend>
     <div>
