@@ -8,9 +8,22 @@ without a code change here (it just won't get a bespoke `outcome`).
 """
 from engine import formulas
 
-# Fields the form never collects: `outcome` is computed here; `ingredients`
-# (list type) is out of scope for slice one.
-SKIP_FIELDS = {"outcome", "ingredients"}
+# Fields the wired forms never collect. `outcome` is computed here;
+# `ingredients` is a list type with no simple widget; `temperature_celsius` is a
+# base_recipe_attempt optional that no wired formula reads.
+SKIP_FIELDS = {"outcome", "ingredients", "temperature_celsius"}
+
+# `duration_minutes` is real input for grilling (it drives char and juiciness)
+# but meaningless on a fermentation form, where ferment length is
+# `fermentation_days`. Skip it only there.
+SKIP_FIELDS_BY_TYPE = {
+    "fermentation_wine": {"duration_minutes"},
+    "fermentation_beer": {"duration_minutes"},
+}
+
+
+def skip_fields(schema_type):
+    return SKIP_FIELDS | SKIP_FIELDS_BY_TYPE.get(schema_type, set())
 
 # schema_type -> function(data dict) -> outcome dict
 OUTCOME_FORMULAS = {
@@ -19,6 +32,10 @@ OUTCOME_FORMULAS = {
     ),
     "fermentation_wine": lambda d: formulas.fermentation_wine_outcome(
         d["starting_gravity"], d["final_gravity"], d["fermentation_days"], d["yeast_strain"]
+    ),
+    "fermentation_beer": lambda d: formulas.fermentation_beer_outcome(
+        d["starting_gravity"], d["final_gravity"], d["fermentation_days"], d["yeast_strain"],
+        d["hop_grams"], d["hop_alpha_acid_percent"], d["boil_time_minutes"]
     ),
 }
 
@@ -36,10 +53,11 @@ def build_entry(schema_type, schema_fields, form, nickname):
     `form` is a plain dict of submitted string values.
     Raises KeyError / ValueError if a required field is missing or unparseable.
     """
+    skip = skip_fields(schema_type)
     data = {}
     for field in schema_fields:
         name = field["name"]
-        if name in SKIP_FIELDS:
+        if name in skip:
             continue
         raw = form.get(name, "")
         if raw == "" or raw is None:
@@ -126,4 +144,23 @@ if __name__ == "__main__":
     }
     assert wine["title"] == "French wine, 28-day ferment (vintner)", wine["title"]
 
-    print("generator self-check ok:", entry["title"], "|", wine["title"], wine["data"]["outcome"])
+    beer_fields = wine_fields + [
+        {"name": "hop_grams", "type": "number", "required": True},
+        {"name": "hop_alpha_acid_percent", "type": "number", "required": True},
+        {"name": "boil_time_minutes", "type": "number", "required": True},
+    ]
+    beer_form = {
+        "cuisine": "German", "cooking_method": "fermenting",
+        "fermentation_days": "21", "yeast_strain": "US-05",
+        "starting_gravity": "1.052", "final_gravity": "1.011",
+        "hop_grams": "45", "hop_alpha_acid_percent": "7.0", "boil_time_minutes": "60",
+    }
+    beer = build_entry("fermentation_beer", beer_fields, beer_form, "brewer")
+    assert beer["data"]["hop_grams"] == 45.0
+    assert set(beer["data"]["outcome"]) == {
+        "abv", "ibu", "clarity", "aroma_score", "quality_score"
+    }
+    assert beer["title"] == "German beer, 21-day ferment (brewer)", beer["title"]
+
+    print("generator self-check ok:", entry["title"], "|", wine["title"], "|",
+          beer["title"], beer["data"]["outcome"])

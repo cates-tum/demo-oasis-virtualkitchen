@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 import client
-from engine import generator, wine_model
+from engine import formulas, generator, wine_model
 
 NICK_COOKIE = "vk_nick"
 
@@ -30,6 +30,12 @@ BENCHES = {
         "blurb": "Must to wine over a set ferment. Quality comes from a "
                  "regression pre-fit on the UCI Wine Quality dataset.",
     },
+    "fermentation_beer": {
+        "bench": "Fermentation",
+        "type_label": "Beer",
+        "blurb": "Wort to beer over a set ferment. Real homebrew math: ABV "
+                 "from the gravity drop, IBU from the Tinseth formula.",
+    },
 }
 
 # Local UI hints only: slider bounds and datalists. Widget ergonomics, not
@@ -40,15 +46,19 @@ HINTS = {
     "internal_temp_celsius": {"widget": "slider", "min": 40, "max": 90, "step": 0.5, "default": 60},
     "duration_minutes": {"widget": "slider", "min": 1, "max": 120, "step": 1, "default": 20},
     "temperature_celsius": {"widget": "slider", "min": 100, "max": 300, "step": 5, "default": 220},
-    # fermentation
+    # fermentation (shared by wine + beer; yeast_strain is handled per type below)
     "fermentation_days": {"widget": "slider", "min": 3, "max": 90, "step": 1, "default": 21},
-    "starting_gravity": {"widget": "slider", "min": 1.050, "max": 1.130, "step": 0.001, "default": 1.090},
-    "final_gravity": {"widget": "slider", "min": 0.985, "max": 1.030, "step": 0.001, "default": 0.995},
-    "yeast_strain": {"widget": "text", "datalist": list(wine_model.STRAIN_PROFILES), "default": "EC-1118"},
-    # shared base fields
-    "cooking_method": {"widget": "text", "datalist": ["grilling", "searing", "roasting", "fermenting"], "default": "grilling"},
+    "starting_gravity": {"widget": "slider", "min": 1.030, "max": 1.120, "step": 0.001, "default": 1.055},
+    "final_gravity": {"widget": "slider", "min": 0.985, "max": 1.030, "step": 0.001, "default": 1.010},
+    # beer only
+    "hop_grams": {"widget": "slider", "min": 0, "max": 200, "step": 5, "default": 40},
+    "hop_alpha_acid_percent": {"widget": "slider", "min": 2, "max": 20, "step": 0.1, "default": 6.0},
+    "boil_time_minutes": {"widget": "slider", "min": 0, "max": 120, "step": 5, "default": 60},
+    # shared base fields (cooking_method default is per-bench, see _field_hint)
     "cuisine": {"widget": "text", "datalist": ["Argentine", "American", "French", "Korean", "Turkish"], "default": ""},
 }
+
+COOKING_METHODS = ["grilling", "searing", "roasting", "fermenting"]
 
 app = FastAPI(title="virtual-kitchen")
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
@@ -59,15 +69,29 @@ def _require_wired(schema_type):
         raise HTTPException(404, f"no wired form for {schema_type!r}")
 
 
+def _field_hint(name, schema_type):
+    """UI hint for one field. Most come from HINTS; a couple depend on the
+    bench type."""
+    if name == "yeast_strain":
+        # brewing yeasts for beer, wine yeasts otherwise; free-text + datalist
+        strains = (list(formulas.BEER_YEAST) if schema_type == "fermentation_beer"
+                   else list(wine_model.STRAIN_PROFILES))
+        return {"widget": "text", "datalist": strains, "default": strains[0]}
+    if name == "cooking_method":
+        default = "fermenting" if schema_type.startswith("fermentation_") else "grilling"
+        return {"widget": "text", "datalist": COOKING_METHODS, "default": default}
+    return HINTS.get(name, {})
+
+
 def _fields_for_form(schema_type, values):
     """Resolve the schema and turn it into template-ready widget descriptors.
     `values` supplies current values (submitted or default)."""
     descriptors = []
     for field in client.get_schema_fields(schema_type):
         name = field["name"]
-        if name in generator.SKIP_FIELDS:
+        if name in generator.skip_fields(schema_type):
             continue
-        hint = HINTS.get(name, {})
+        hint = _field_hint(name, schema_type)
         enum = field.get("enum")
         if enum:
             widget = "select"
@@ -87,6 +111,7 @@ def _fields_for_form(schema_type, values):
             "options": enum or hint.get("options"),
             "datalist": hint.get("datalist"),
             "value": current,
+            "inherited": field.get("group") != schema_type,
         })
     return descriptors
 
@@ -123,6 +148,11 @@ def _result_note(schema_type, outcome, inputs):
         return ("quality_score comes from an OLS regression pre-fit offline on "
                 "the UCI Wine Quality dataset (alcohol, volatile acidity, "
                 "sulphates, residual sugar, density), scaled to 0-100.")
+    if schema_type == "fermentation_beer":
+        return ("abv is the gravity drop times 131.25; ibu is the Tinseth "
+                f"formula over hop_grams, hop_alpha_acid_percent, "
+                f"boil_time_minutes and a fixed {formulas.BATCH_VOLUME_LITERS:g} L "
+                "batch. clarity, aroma, and quality are rule-based.")
     return None
 
 

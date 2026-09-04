@@ -1,11 +1,12 @@
 """Rule engine for the grilling and fermentation benches.
 
-Wired so far: grill_red_meat, fermentation_wine. Every outcome follows the same
-shape: bounded input ranges -> a real-reference formula -> small bounded noise
--> output clamped to a sane range.
+Wired so far: grill_red_meat, fermentation_wine, fermentation_beer. Every
+outcome follows the same shape: bounded input ranges -> a real-reference
+formula -> small bounded noise -> output clamped to a sane range.
 
 Wine quality goes through engine/wine_model.py (a regression pre-fit offline on
-the UCI Wine Quality dataset). beer / poultry / fish come later.
+the UCI Wine Quality dataset). Beer uses real homebrew math (gravity-drop ABV,
+Tinseth IBU) plus rule-based clarity/aroma/quality. poultry / fish come later.
 """
 import math
 import os
@@ -224,6 +225,133 @@ def fermentation_wine_outcome(starting_gravity, final_gravity, fermentation_days
     }
 
 
+# --- fermentation bench: beer -----------------------------------------------
+
+# Beer wort is thinner than must; keep a beer-specific starting-gravity range.
+BEER_GRAVITY_START_RANGE = (1.020, 1.120)
+HOP_GRAMS_RANGE = (0.0, 300.0)
+HOP_AA_RANGE = (2.0, 22.0)
+BOIL_TIME_RANGE = (0.0, 120.0)
+
+# CLAUDE.md: assume a fixed batch size unless the schema carries a volume
+# field. It does not, so the Tinseth calc uses this. If a volume field is
+# added to fermentation_beer later, thread it through beer_ibu.
+BATCH_VOLUME_LITERS = 20.0
+
+# A few real brewing yeasts. `aroma_base` seeds aroma_score; `floc`
+# (flocculation, 0-1) drives how fast the beer drops bright. Unknown strain ->
+# DEFAULT_BEER_YEAST so a new strain still produces an entry.
+BEER_YEAST = {
+    "US-05":   {"aroma_base": 48, "floc": 0.60},   # American ale, clean
+    "S-04":    {"aroma_base": 58, "floc": 0.90},    # English ale, fruity, fast to clear
+    "WLP001":  {"aroma_base": 50, "floc": 0.55},    # California ale, clean
+    "WB-06":   {"aroma_base": 74, "floc": 0.20},    # wheat / hefe, banana-clove, stays hazy
+    "T-58":    {"aroma_base": 66, "floc": 0.50},    # Belgian, spicy / estery
+    "W-34/70": {"aroma_base": 40, "floc": 0.65},    # lager, very clean
+}
+DEFAULT_BEER_YEAST = {"aroma_base": 52, "floc": 0.55}
+
+
+def beer_yeast_profile(strain):
+    return BEER_YEAST.get(strain, DEFAULT_BEER_YEAST)
+
+
+def beer_abv(starting_gravity, final_gravity):
+    """ABV ~= (SG - FG) * 131.25, the standard homebrew estimate."""
+    sg = _clamp(starting_gravity, *BEER_GRAVITY_START_RANGE)
+    fg = _clamp(final_gravity, *GRAVITY_FINAL_RANGE)
+    abv = (sg - fg) * 131.25
+    return round(_clamp(abv + _noise(-0.3, 0.3), 0.0, 15.0), 2)
+
+
+def beer_ibu(hop_grams, hop_alpha_acid_percent, boil_time_minutes, starting_gravity,
+             batch_volume_liters=BATCH_VOLUME_LITERS):
+    """Tinseth (1997) IBU estimate.
+
+        mg/L alpha acids = AA_decimal * grams * 1000 / volume_liters
+        bigness factor   = 1.65 * 0.000125 ** (OG - 1)
+        boil-time factor = (1 - e**(-0.04 * minutes)) / 4.15
+        IBU              = bigness * boil_time * mg/L
+    """
+    grams = _clamp(hop_grams, *HOP_GRAMS_RANGE)
+    aa = _clamp(hop_alpha_acid_percent, *HOP_AA_RANGE) / 100.0
+    minutes = _clamp(boil_time_minutes, *BOIL_TIME_RANGE)
+    og = _clamp(starting_gravity, *BEER_GRAVITY_START_RANGE)
+
+    mgl = aa * grams * 1000.0 / batch_volume_liters
+    bigness = 1.65 * 0.000125 ** (og - 1.0)
+    boil_factor = (1.0 - math.exp(-0.04 * minutes)) / 4.15
+    ibu = bigness * boil_factor * mgl
+    return round(_clamp(ibu + _noise(-2, 2), 0.0, 120.0), 1)
+
+
+def beer_clarity(fermentation_days, final_gravity, yeast_strain):
+    """String label. Longer conditioning, a lower finishing gravity, and a
+    higher-flocculation strain all mean a brighter beer. Deterministic."""
+    d = _clamp(fermentation_days, *FERMENT_DAYS_RANGE)
+    fg = _clamp(final_gravity, *GRAVITY_FINAL_RANGE)
+    floc = beer_yeast_profile(yeast_strain)["floc"]
+    idx = d * 1.1 - (fg - 0.995) * 250 + floc * 25
+    if idx < 15:
+        return "cloudy"
+    if idx < 32:
+        return "hazy"
+    if idx < 55:
+        return "clear"
+    return "brilliant"
+
+
+def beer_aroma_score(fermentation_days, yeast_strain, ibu, hop_grams):
+    """0-100. Strain baseline plus hop presence, with a ferment-length sweet
+    spot near two weeks; aggressive bitterness above ~80 IBU masks balance."""
+    d = _clamp(fermentation_days, *FERMENT_DAYS_RANGE)
+    grams = _clamp(hop_grams, *HOP_GRAMS_RANGE)
+    raw = (beer_yeast_profile(yeast_strain)["aroma_base"]
+           + min(grams * 0.15, 20)
+           + (8 - abs(d - 18) * 0.3)
+           - max(ibu - 80, 0) * 0.3)
+    return round(_clamp(raw + _noise(-4, 4)), 1)
+
+
+def beer_quality_score(ibu, clarity, aroma_score, fermentation_days, starting_gravity, final_gravity):
+    """Rule-based (no dataset for beer). Rewards a balanced BU:GU ratio,
+    reasonable apparent attenuation, aroma, clarity, and enough conditioning
+    time."""
+    og = _clamp(starting_gravity, *BEER_GRAVITY_START_RANGE)
+    fg = _clamp(final_gravity, *GRAVITY_FINAL_RANGE)
+    gu = (og - 1.0) * 1000.0                       # gravity units, ~50 for OG 1.050
+    bugu = ibu / gu if gu > 0 else 0.0             # bitterness-to-gravity, ~0.6 balanced
+    attenuation = (og - fg) / (og - 1.0) if og > 1.0 else 0.0   # apparent, ~0.78 typical
+
+    balance_fit = _clamp(100 - abs(bugu - 0.6) * 120)
+    atten_fit = _clamp(100 - abs(attenuation - 0.78) * 300)
+    cond_fit = _clamp(100 - abs(fermentation_days - 21) * 3)
+    clarity_score = {"cloudy": 45, "hazy": 65, "clear": 85, "brilliant": 95}[clarity]
+
+    raw = (0.30 * balance_fit + 0.20 * atten_fit + 0.20 * aroma_score
+           + 0.15 * clarity_score + 0.15 * cond_fit)
+    return round(_clamp(raw + _noise(-3, 3)), 1)
+
+
+def fermentation_beer_outcome(starting_gravity, final_gravity, fermentation_days, yeast_strain,
+                              hop_grams, hop_alpha_acid_percent, boil_time_minutes):
+    """Full fermentation_beer outcome block. ABV and IBU are computed first;
+    aroma and quality consume IBU, quality also consumes clarity."""
+    abv = beer_abv(starting_gravity, final_gravity)
+    ibu = beer_ibu(hop_grams, hop_alpha_acid_percent, boil_time_minutes, starting_gravity)
+    clarity = beer_clarity(fermentation_days, final_gravity, yeast_strain)
+    aroma = beer_aroma_score(fermentation_days, yeast_strain, ibu, hop_grams)
+    return {
+        "abv": abv,
+        "ibu": ibu,
+        "clarity": clarity,
+        "aroma_score": aroma,
+        "quality_score": beer_quality_score(
+            ibu, clarity, aroma, fermentation_days, starting_gravity, final_gravity
+        ),
+    }
+
+
 if __name__ == "__main__":
     random.seed(0)
 
@@ -283,5 +411,34 @@ if __name__ == "__main__":
                         assert 0.0 <= out[k] <= 100.0, (sg, fg, days, strain, k, out[k])
                     assert 3.0 <= out["acidity"] <= 12.0, out["acidity"]
                     assert out["clarity"] in {"cloudy", "hazy", "clear", "brilliant"}
+
+    # --- beer ---
+    # ABV tracks the gravity drop
+    assert 4.5 < beer_abv(1.050, 1.012) < 5.5, beer_abv(1.050, 1.012)
+
+    # Tinseth reference: 30 g of 6% AA hops, 60 min boil, OG 1.050, 20 L
+    # lands near 20 IBU on standard calculators
+    ref_ibu = beer_ibu(30, 6.0, 60, 1.050)
+    assert 16 < ref_ibu < 25, ref_ibu
+    # more hops and a longer boil both raise IBU
+    assert beer_ibu(60, 6.0, 60, 1.050) > ref_ibu
+    assert beer_ibu(30, 6.0, 90, 1.050) > beer_ibu(30, 6.0, 15, 1.050)
+
+    # a balanced, well-attenuated, conditioned beer beats a stuck, flabby one
+    good_beer = fermentation_beer_outcome(1.052, 1.011, 21, "S-04", 45, 7.0, 60)
+    poor_beer = fermentation_beer_outcome(1.038, 1.020, 6, "WB-06", 4, 3.0, 10)
+    assert good_beer["quality_score"] > poor_beer["quality_score"], (good_beer, poor_beer)
+
+    # every numeric beer outcome stays inside its clamp across the input grid
+    for sg in (1.030, 1.055, 1.085, 1.115):
+        for fg in (0.998, 1.008, 1.018, 1.028):
+            for days in (3, 18, 45, 120):
+                for strain in ("US-05", "W-34/70", "unknown-strain"):
+                    for hg, aa, bt in ((0, 3.0, 0), (40, 7.0, 60), (200, 18.0, 90)):
+                        out = fermentation_beer_outcome(sg, fg, days, strain, hg, aa, bt)
+                        for k in ("aroma_score", "quality_score"):
+                            assert 0.0 <= out[k] <= 100.0, (sg, fg, days, strain, k, out[k])
+                        assert 0.0 <= out["ibu"] <= 120.0, out["ibu"]
+                        assert out["clarity"] in {"cloudy", "hazy", "clear", "brilliant"}
 
     print("formulas self-check ok")

@@ -33,8 +33,10 @@ def _load_all_schemas():
 
 def get_schema_fields(schema_type):
     """Ordered, flattened field list for `schema_type`, inherited fields from
-    `extends` merged in first. Each item: {name, type, required}. The computed
-    `outcome` object is left in the list; callers skip it themselves.
+    `extends` merged in first. Each item: {name, type, required, enum, group},
+    where `group` is the schema that declared the field (so the UI can separate
+    inherited base fields from bench-specific ones). The computed `outcome`
+    object is left in the list; callers skip it themselves.
     """
     all_schemas = _load_all_schemas()
     if schema_type not in all_schemas:
@@ -55,6 +57,7 @@ def get_schema_fields(schema_type):
                 "type": spec.get("type", "string"),
                 "required": bool(spec.get("required")),
                 "enum": spec.get("enum"),
+                "group": name,
             }
             if fname in known:  # child overrides parent
                 fields = [item if f["name"] == fname else f for f in fields]
@@ -100,4 +103,6 @@ if __name__ == "__main__":
     by_name = {f["name"]: f for f in fields}
     assert by_name["heat_source"]["enum"] == ["grill", "pan", "oven"], by_name["heat_source"]
     assert by_name["cuisine"]["enum"] is None
+    assert by_name["cuisine"]["group"] == "base_recipe_attempt", by_name["cuisine"]
+    assert by_name["heat_source"]["group"] == "grill_red_meat", by_name["heat_source"]
     print("client self-check ok:", names)

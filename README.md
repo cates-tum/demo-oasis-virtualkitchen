@@ -9,13 +9,14 @@ result back as an entry.
 
 ## Scope so far
 
-Two bench types wired end to end:
+Three bench types wired end to end:
 
 - **grilling / red meat** (`grill_red_meat`)
 - **fermentation / wine** (`fermentation_wine`)
+- **fermentation / beer** (`fermentation_beer`)
 
 The landing page lists them; each is `GET /form/<schema_type>` ->
-`POST /run/<schema_type>`. Beer, poultry, and fish formulas are not written yet.
+`POST /run/<schema_type>`. Poultry and fish formulas are not written yet.
 The wired list is exactly the keys of `engine.generator.OUTCOME_FORMULAS`.
 
 ## Run it
@@ -39,8 +40,9 @@ Then open http://localhost:8001.
 
 ```
 engine/
-  formulas.py     grill + wine outcome math, noise/clamp helpers
-  wine_model.py   UCI-fit wine quality coefficients + yeast-strain profiles
+  formulas.py     grill + wine + beer outcome math, noise/clamp helpers,
+                  beer yeast table
+  wine_model.py   UCI-fit wine quality coefficients + wine yeast profiles
   generator.py    schema fields + form values -> POST /entries payload
 web/
   app.py          FastAPI: landing, GET /form/<type>, POST /run/<type>
@@ -57,6 +59,21 @@ and `client.py` has an `if __name__ == "__main__"` self-check:
 .venv/bin/python -m engine.generator
 .venv/bin/python client.py          # needs pseudo-oasis running
 ```
+
+## Form fields
+
+The form is built from the fetched schema. `client.get_schema_fields` tags each
+field with the schema that declared it, so the form renders two groups:
+**General** (fields inherited from `base_recipe_attempt`: `cuisine`,
+`cooking_method`) and **<Type> parameters** (fields the bench schema itself
+declares). `cuisine` and `cooking_method` are `required: true` on the base
+schema, so every entry type must send them, fermentation included;
+`cooking_method` just defaults per bench (`grilling` / `fermenting`).
+
+`generator.skip_fields(schema_type)` drops fields the wired forms do not
+collect: `outcome` (computed), `ingredients` (list type), `temperature_celsius`
+(no wired formula reads it), and `duration_minutes` on fermentation forms only
+(grilling still uses it).
 
 ## grill_red_meat outcome formulas
 
@@ -106,7 +123,40 @@ runtime. To refit: download the dataset and run
 `python3 engine/fit_wine_model.py winequality-red.csv`, then paste its output
 into `wine_model.py`. That script is not imported by the app.
 
-`VK_SEED=<int>` in `.env` makes the noise reproducible across runs, both benches.
+## fermentation_beer outcome formulas
+
+Inputs: `starting_gravity` (OG), `final_gravity` (FG), `fermentation_days` (D),
+`yeast_strain`, `hop_grams`, `hop_alpha_acid_percent` (AA), `boil_time_minutes`
+(t). Brewing yeast table (`US-05`, `S-04`, `WLP001`, `WB-06`, `T-58`, `W-34/70`,
+else a default) lives in `engine/formulas.py`. No dataset for beer: quality is
+rule-based, built on real homebrew relationships.
+
+| output | logic | noise |
+|---|---|---|
+| `abv` | `(OG - FG) * 131.25`, clamped 0-15 | +/- 0.3 |
+| `ibu` | Tinseth: `bigness * boil_factor * mgL`, clamped 0-120 (see below) | +/- 2 |
+| `clarity` | index `D*1.1 - (FG - 0.995)*250 + strain.floc*25`: <15 cloudy, <32 hazy, <55 clear, else brilliant | none |
+| `aroma_score` | `strain.aroma_base + min(hop_grams*0.15, 20) + (8 - abs(D - 18)*0.3) - max(ibu - 80, 0)*0.3` | +/- 4 |
+| `quality_score` | `0.30*balance_fit + 0.20*atten_fit + 0.20*aroma + 0.15*clarity_score + 0.15*cond_fit` | +/- 3 |
+
+IBU is the Tinseth (1997) formula on a fixed 20 L batch (`BATCH_VOLUME_LITERS`
+in `formulas.py`; the schema carries no volume field):
+
+```
+mgL          = (AA/100) * hop_grams * 1000 / 20
+bigness      = 1.65 * 0.000125 ** (OG - 1)
+boil_factor  = (1 - e**(-0.04 * t)) / 4.15
+IBU          = bigness * boil_factor * mgL
+```
+
+`quality_score` terms: `balance_fit` rewards a BU:GU ratio near 0.6
+(`ibu / ((OG-1)*1000)`), `atten_fit` rewards apparent attenuation near 0.78
+(`(OG-FG)/(OG-1)`), `cond_fit` rewards ferment length near 21 days,
+`clarity_score` maps the label to cloudy 45 / hazy 65 / clear 85 / brilliant 95.
+Extreme hop bills can drive raw Tinseth IBU past 120; the clamp there is a
+deliberate ceiling, not a model of isomerization saturation.
+
+`VK_SEED=<int>` in `.env` makes the noise reproducible across runs, all benches.
 
 ## Known gaps / findings for the platform
 
