@@ -1,14 +1,17 @@
-"""Rule engine for the grilling bench.
+"""Rule engine for the grilling and fermentation benches.
 
-Slice one covers grill_red_meat only. Every outcome follows the same shape:
-bounded input ranges -> a real-reference formula -> small bounded noise ->
-output clamped to 0-100.
+Wired so far: grill_red_meat, fermentation_wine. Every outcome follows the same
+shape: bounded input ranges -> a real-reference formula -> small bounded noise
+-> output clamped to a sane range.
 
-beer/wine formulas will be added here (or alongside) later.
+Wine quality goes through engine/wine_model.py (a regression pre-fit offline on
+the UCI Wine Quality dataset). beer / poultry / fish come later.
 """
 import math
 import os
 import random
+
+from engine import wine_model
 
 # Optional: VK_SEED=<int> makes formula noise reproducible across runs (handy
 # for a scripted demo). Unset means fresh randomness each experiment.
@@ -125,6 +128,102 @@ def grill_red_meat_outcome(internal_temp_celsius, heat_source, duration_minutes)
     }
 
 
+# --- fermentation bench: wine -------------------------------------------------
+
+# Plausible operating ranges for the wine form inputs. Outside values clamp in.
+GRAVITY_START_RANGE = (1.050, 1.130)
+GRAVITY_FINAL_RANGE = (0.985, 1.030)
+FERMENT_DAYS_RANGE = (3.0, 120.0)
+
+# Titratable acidity of finished wine, g/L. Typical table wine sits ~5-9.
+ACIDITY_RANGE = (3.0, 12.0)
+
+
+def wine_abv(starting_gravity, final_gravity):
+    """Same gravity-drop formula as beer: ABV ~= (SG - FG) * 131.25."""
+    sg = _clamp(starting_gravity, *GRAVITY_START_RANGE)
+    fg = _clamp(final_gravity, *GRAVITY_FINAL_RANGE)
+    abv = (sg - fg) * 131.25
+    return round(_clamp(abv + _noise(-0.3, 0.3), 0.0, 20.0), 2)
+
+
+def wine_acidity(final_gravity, fermentation_days, yeast_strain):
+    """Rule-based titratable acidity. Base ~6 g/L, nudged by residual sweetness
+    (higher FG reads a touch more acidic on the palate here), ferment length,
+    and a small per-strain term."""
+    fg = _clamp(final_gravity, *GRAVITY_FINAL_RANGE)
+    d = _clamp(fermentation_days, *FERMENT_DAYS_RANGE)
+    profile = wine_model.get_profile(yeast_strain)
+    raw = 6.0 + (fg - 0.996) * 120 + d * 0.01 + profile["va_bump"] * 10
+    return round(_clamp(raw + _noise(-0.3, 0.3), *ACIDITY_RANGE), 2)
+
+
+def wine_clarity(fermentation_days, final_gravity):
+    """String label. Longer ferment and a lower finishing gravity mean more
+    time to drop bright. Deterministic: it is a label off a clarity index."""
+    d = _clamp(fermentation_days, *FERMENT_DAYS_RANGE)
+    fg = _clamp(final_gravity, *GRAVITY_FINAL_RANGE)
+    idx = d * 1.2 - (fg - 0.99) * 300
+    if idx < 15:
+        return "cloudy"
+    if idx < 35:
+        return "hazy"
+    if idx < 60:
+        return "clear"
+    return "brilliant"
+
+
+def wine_aroma_score(fermentation_days, yeast_strain, abv):
+    """0-100. Strain sets the baseline; ferment length has a sweet spot around
+    a month; hot alcohol above ~14% ABV knocks it back."""
+    d = _clamp(fermentation_days, *FERMENT_DAYS_RANGE)
+    profile = wine_model.get_profile(yeast_strain)
+    raw = profile["aroma_base"] + (12 - abs(d - 30) * 0.4) - max(abv - 14, 0) * 3
+    return round(_clamp(raw + _noise(-4, 4)), 1)
+
+
+def wine_quality_features(starting_gravity, final_gravity, fermentation_days, yeast_strain, abv):
+    """Map the four form inputs (+ computed ABV) onto the five physicochemical
+    proxies the offline UCI regression expects, each clamped to the dataset's
+    observed range."""
+    fg = _clamp(final_gravity, *GRAVITY_FINAL_RANGE)
+    d = _clamp(fermentation_days, *FERMENT_DAYS_RANGE)
+    profile = wine_model.get_profile(yeast_strain)
+
+    def clamp_feat(name, value):
+        return _clamp(value, *wine_model.FEATURE_RANGE[name])
+
+    return {
+        "alcohol": clamp_feat("alcohol", abv),
+        "density": clamp_feat("density", fg),
+        "residual_sugar": clamp_feat("residual_sugar", 1.5 + (fg - 0.995) * 400),
+        "volatile_acidity": clamp_feat("volatile_acidity", 0.30 + d * 0.006 + profile["va_bump"]),
+        "sulphates": clamp_feat("sulphates", profile["sulphates"]),
+    }
+
+
+def wine_quality_score(starting_gravity, final_gravity, fermentation_days, yeast_strain, abv):
+    """Offline-fit UCI regression -> 0-10 -> scaled to 0-100, plus bounded noise."""
+    feats = wine_quality_features(starting_gravity, final_gravity, fermentation_days, yeast_strain, abv)
+    q10 = wine_model.predict_quality(**feats)
+    return round(_clamp(q10 * 10 + _noise(-3, 3)), 1)
+
+
+def fermentation_wine_outcome(starting_gravity, final_gravity, fermentation_days, yeast_strain):
+    """Full fermentation_wine outcome block. ABV is computed first; acidity,
+    aroma, and quality all consume it."""
+    abv = wine_abv(starting_gravity, final_gravity)
+    return {
+        "abv": abv,
+        "acidity": wine_acidity(final_gravity, fermentation_days, yeast_strain),
+        "clarity": wine_clarity(fermentation_days, final_gravity),
+        "aroma_score": wine_aroma_score(fermentation_days, yeast_strain, abv),
+        "quality_score": wine_quality_score(
+            starting_gravity, final_gravity, fermentation_days, yeast_strain, abv
+        ),
+    }
+
+
 if __name__ == "__main__":
     random.seed(0)
 
@@ -159,5 +258,30 @@ if __name__ == "__main__":
     # unsafe food caps quality
     capped = quality_score(food_safety=8.0, juiciness=95.0, char=35.0, doneness_label="medium_rare")
     assert capped <= 8.0, capped
+
+    # --- wine ---
+    # ABV tracks the gravity drop
+    assert 11 < wine_abv(1.090, 1.000) < 13, wine_abv(1.090, 1.000)
+    assert wine_abv(1.090, 0.992) > wine_abv(1.090, 1.005)
+
+    # clarity sharpens with a longer ferment
+    assert wine_clarity(7, 1.005) == "cloudy", wine_clarity(7, 1.005)
+    assert wine_clarity(90, 0.992) == "brilliant", wine_clarity(90, 0.992)
+
+    # a "good" wine spec outscores a "poor" one, both in range
+    good = fermentation_wine_outcome(1.095, 0.993, 30, "D47")
+    poor = fermentation_wine_outcome(1.060, 1.010, 8, "EC-1118")
+    assert good["quality_score"] > poor["quality_score"], (good, poor)
+
+    # every numeric wine outcome stays inside 0-100 across the input grid
+    for sg in (1.050, 1.080, 1.110, 1.130):
+        for fg in (0.990, 0.998, 1.010, 1.025):
+            for days in (3, 21, 60, 120):
+                for strain in ("EC-1118", "D47", "unknown-strain"):
+                    out = fermentation_wine_outcome(sg, fg, days, strain)
+                    for k in ("aroma_score", "quality_score"):
+                        assert 0.0 <= out[k] <= 100.0, (sg, fg, days, strain, k, out[k])
+                    assert 3.0 <= out["acidity"] <= 12.0, out["acidity"]
+                    assert out["clarity"] in {"cloudy", "hazy", "clear", "brilliant"}
 
     print("formulas self-check ok")

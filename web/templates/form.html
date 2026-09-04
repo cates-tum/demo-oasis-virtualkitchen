@@ -1,19 +1,17 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Run a grilling experiment</h1>
-<p class="sub">Grilling bench &rarr; red meat. Fields come live from pseudo-oasis's
-<code>{{ schema_type }}</code> schema.</p>
-
-<p class="crumbs">Bench: <strong>Grilling</strong> &nbsp;/&nbsp; Type: <strong>Red meat</strong>
-<span class="note">(other benches/types not wired yet)</span></p>
+<p class="crumbs"><a href="/">&larr; Benches</a></p>
+<h1>Run a {{ bench|lower }} experiment</h1>
+<p class="sub">{{ bench }} bench &rarr; {{ type_label|lower }}. Fields come live from
+pseudo-oasis's <code>{{ schema_type }}</code> schema.</p>
 
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
 
 {% if fields %}
-<form method="post" action="/run">
+<form method="post" action="/run/{{ schema_type }}">
   <div>
     <label for="nickname">Nickname <span class="note">(shown as submitter)</span></label>
-    <input type="text" id="nickname" name="nickname" value="{{ nickname }}" placeholder="e.g. chef_sam">
+    <input type="text" id="nickname" name="nickname" value="{{ nickname }}" placeholder="e.g. Samwise Gamgee">
   </div>
 
   {% for f in fields %}

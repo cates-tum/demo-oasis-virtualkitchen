@@ -7,11 +7,16 @@ result back as an entry.
 
 `pseudo-oasis` must be running first. This app stores nothing itself.
 
-## Slice one scope
+## Scope so far
 
-One bench type end to end: **grilling / red meat** (`grill_red_meat`).
-The bench and type pickers are stubbed to that. Beer, wine, poultry, and fish
-formulas are not written yet.
+Two bench types wired end to end:
+
+- **grilling / red meat** (`grill_red_meat`)
+- **fermentation / wine** (`fermentation_wine`)
+
+The landing page lists them; each is `GET /form/<schema_type>` ->
+`POST /run/<schema_type>`. Beer, poultry, and fish formulas are not written yet.
+The wired list is exactly the keys of `engine.generator.OUTCOME_FORMULAS`.
 
 ## Run it
 
@@ -22,8 +27,7 @@ cp .env.example .env            # edit if pseudo-oasis is not on localhost:8000
 .venv/bin/uvicorn web.app:app --reload
 ```
 
-Open http://localhost:8000 ... use a different port if `pseudo-oasis` already
-has 8000:
+`pseudo-oasis` already uses port 8000, so run this app on another port:
 
 ```bash
 .venv/bin/uvicorn web.app:app --reload --port 8001
@@ -35,19 +39,21 @@ Then open http://localhost:8001.
 
 ```
 engine/
-  formulas.py     grill_red_meat outcome math + noise/clamp helpers
+  formulas.py     grill + wine outcome math, noise/clamp helpers
+  wine_model.py   UCI-fit wine quality coefficients + yeast-strain profiles
   generator.py    schema fields + form values -> POST /entries payload
 web/
-  app.py          FastAPI: GET / (form), POST /run (compute + push + result)
-  templates/      base.html, form.html, result.html
+  app.py          FastAPI: landing, GET /form/<type>, POST /run/<type>
+  templates/      base.html, index.html, form.html, result.html
 client.py         GET /schemas and POST /entries against pseudo-oasis
 ```
 
-Each of `engine/formulas.py`, `engine/generator.py`, and `client.py` has an
-`if __name__ == "__main__"` self-check:
+Each of `engine/formulas.py`, `engine/wine_model.py`, `engine/generator.py`,
+and `client.py` has an `if __name__ == "__main__"` self-check:
 
 ```bash
-.venv/bin/python engine/formulas.py
+.venv/bin/python -m engine.formulas
+.venv/bin/python -m engine.wine_model
 .venv/bin/python -m engine.generator
 .venv/bin/python client.py          # needs pseudo-oasis running
 ```
@@ -70,7 +76,37 @@ A true medium-rare steak (57 C) scores low on `food_safety_score` on purpose:
 that is the USDA guideline talking, and it is the one number the demo needs to
 get right.
 
-`VK_SEED=<int>` in `.env` makes the noise reproducible across runs.
+## fermentation_wine outcome formulas
+
+Inputs: `starting_gravity` (SG), `final_gravity` (FG), `fermentation_days` (D),
+`yeast_strain`. Strain profiles (`EC-1118`, `71B`, `D47`, `RC-212`, `K1-V1116`,
+else a default) live in `engine/wine_model.py`. Numeric outputs are
+`formula + bounded noise`, then clamped.
+
+| output | logic | noise |
+|---|---|---|
+| `abv` | `(SG - FG) * 131.25` (same as beer), clamped 0-20 | +/- 0.3 |
+| `acidity` (g/L) | `6.0 + (FG - 0.996)*120 + D*0.01 + strain.va_bump*10`, clamped 3-12 | +/- 0.3 |
+| `clarity` | index `D*1.2 - (FG - 0.99)*300`: <15 cloudy, <35 hazy, <60 clear, else brilliant | none |
+| `aroma_score` | `strain.aroma_base + (12 - abs(D - 30)*0.4) - max(abv - 14, 0)*3`, clamped 0-100 | +/- 4 |
+| `quality_score` | offline OLS regression, then `*10` to reach 0-100 | +/- 3 |
+
+`quality_score` uses coefficients in `engine/wine_model.py`, fit once offline by
+OLS on the UCI Wine Quality dataset (red, n=1599, R^2 0.34):
+
+```
+quality ~ alcohol + volatile_acidity + sulphates + residual_sugar + density
+```
+
+The five features are derived from the form inputs (ABV -> alcohol,
+FG -> density, FG -> residual sugar, D + strain -> volatile acidity,
+strain -> sulphates) and each clamped to the dataset's observed range so the
+linear model is never extrapolated far. Nothing is fetched or trained at
+runtime. To refit: download the dataset and run
+`python3 engine/fit_wine_model.py winequality-red.csv`, then paste its output
+into `wine_model.py`. That script is not imported by the app.
+
+`VK_SEED=<int>` in `.env` makes the noise reproducible across runs, both benches.
 
 ## Known gaps / findings for the platform
 
@@ -89,5 +125,5 @@ Resolved:
 
 ## Docker
 
-Not set up yet. Slice one runs under `uvicorn --reload`. A `Dockerfile` and a
-compose service networked to `pseudo-oasis` come with the next slice.
+Not set up yet. Runs under `uvicorn --reload` for now. A `Dockerfile` and a
+compose service networked to `pseudo-oasis` come with a later slice.

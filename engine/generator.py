@@ -17,6 +17,9 @@ OUTCOME_FORMULAS = {
     "grill_red_meat": lambda d: formulas.grill_red_meat_outcome(
         d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20)
     ),
+    "fermentation_wine": lambda d: formulas.fermentation_wine_outcome(
+        d["starting_gravity"], d["final_gravity"], d["fermentation_days"], d["yeast_strain"]
+    ),
 }
 
 
@@ -64,6 +67,10 @@ def _title(schema_type, data, nickname):
         cut = schema_type.removeprefix("grill_").replace("_", " ")
         src = data.get("heat_source", "heat")
         return f"{cuisine} {cut} on {src}{who}"
+    if schema_type.startswith("fermentation_"):
+        kind = schema_type.removeprefix("fermentation_").replace("_", " ")
+        days = int(data.get("fermentation_days", 0))
+        return f"{cuisine} {kind}, {days}-day ferment{who}"
     return f"{cuisine} {schema_type}{who}"
 
 
@@ -98,4 +105,25 @@ if __name__ == "__main__":
     else:
         raise AssertionError("expected ValueError for missing required field")
 
-    print("generator self-check ok:", entry["title"], entry["data"]["outcome"])
+    wine_fields = [
+        {"name": "cuisine", "type": "string", "required": True},
+        {"name": "cooking_method", "type": "string", "required": True},
+        {"name": "outcome", "type": "object", "required": False},
+        {"name": "fermentation_days", "type": "number", "required": True},
+        {"name": "yeast_strain", "type": "string", "required": True},
+        {"name": "starting_gravity", "type": "number", "required": True},
+        {"name": "final_gravity", "type": "number", "required": True},
+    ]
+    wine_form = {
+        "cuisine": "French", "cooking_method": "fermenting",
+        "fermentation_days": "28", "yeast_strain": "D47",
+        "starting_gravity": "1.092", "final_gravity": "0.994",
+    }
+    wine = build_entry("fermentation_wine", wine_fields, wine_form, "vintner")
+    assert wine["data"]["starting_gravity"] == 1.092
+    assert set(wine["data"]["outcome"]) == {
+        "abv", "acidity", "clarity", "aroma_score", "quality_score"
+    }
+    assert wine["title"] == "French wine, 28-day ferment (vintner)", wine["title"]
+
+    print("generator self-check ok:", entry["title"], "|", wine["title"], wine["data"]["outcome"])

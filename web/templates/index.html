@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>virtual-kitchen</h1>
+<p class="sub">Pick a bench type. The form is built from pseudo-oasis's schema,
+the outcome from a formula-based rule engine, and the result is pushed back as
+an entry.</p>
+
+{% for c in cards %}
+<div style="border:1px solid GrayText; border-radius:8px; padding:1rem; margin-bottom:1rem">
+  <h2 style="font-size:1.1rem; margin:0 0 .25rem">{{ c.bench }} &rarr; {{ c.type_label }}</h2>
+  <p class="note" style="margin:.25rem 0 .75rem">{{ c.blurb }}</p>
+  <a class="button" href="/form/{{ c.schema_type }}"><button type="button">Open form</button></a>
+</div>
+{% endfor %}
+{% endblock %}

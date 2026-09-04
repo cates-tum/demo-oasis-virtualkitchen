@@ -6,20 +6,12 @@
 
 <h2 style="font-size:1.1rem">Outcome</h2>
 <table>
-  <tr><th>doneness</th><td>{{ outcome.doneness }}</td></tr>
-  <tr><th>char_level</th><td>{{ outcome.char_level }} / 100</td></tr>
-  <tr><th>juiciness_score</th><td>{{ outcome.juiciness_score }} / 100</td></tr>
-  <tr><th>food_safety_score</th><td>{{ outcome.food_safety_score }} / 100</td></tr>
-  <tr><th>quality_score</th><td>{{ outcome.quality_score }} / 100</td></tr>
+  {% for k, v in outcome.items() %}
+  <tr><th>{{ k }}</th><td>{{ v }}{% if v is number and k.endswith("_score") %} / 100{% endif %}</td></tr>
+  {% endfor %}
 </table>
 
-<p class="note">
-  food_safety_score is a logistic curve centred on the ~{{ safe_temp }}&deg;C USDA
-  minimum safe internal temp for red meat. An internal temp of
-  {{ inputs.internal_temp_celsius }}&deg;C
-  {% if outcome.food_safety_score < 50 %}sits below that reference, so the score is low by design.
-  {% else %}clears that reference.{% endif %}
-</p>
+{% if note %}<p class="note">{{ note }}</p>{% endif %}
 
 <h2 style="font-size:1.1rem">Inputs</h2>
 <table>
