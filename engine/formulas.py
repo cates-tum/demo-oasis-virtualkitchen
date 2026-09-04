@@ -1,12 +1,15 @@
 """Rule engine for the grilling and fermentation benches.
 
-Wired so far: grill_red_meat, fermentation_wine, fermentation_beer. Every
-outcome follows the same shape: bounded input ranges -> a real-reference
-formula -> small bounded noise -> output clamped to a sane range.
+Wired: grill_red_meat / grill_poultry / grill_fish, fermentation_wine,
+fermentation_beer. Every outcome follows the same shape: bounded input ranges
+-> a real-reference formula -> small bounded noise -> output clamped to a sane
+range.
 
-Wine quality goes through engine/wine_model.py (a regression pre-fit offline on
-the UCI Wine Quality dataset). Beer uses real homebrew math (gravity-drop ABV,
-Tinseth IBU) plus rule-based clarity/aroma/quality. poultry / fish come later.
+The three grilling types share one outcome block, parametrised per meat by
+safe internal temp, doneness bands, and how fast juiciness/char move. Wine
+quality goes through engine/wine_model.py (a regression pre-fit offline on the
+UCI Wine Quality dataset). Beer uses real homebrew math (gravity-drop ABV,
+Tinseth IBU) plus rule-based clarity/aroma/quality.
 """
 import math
 import os
@@ -20,27 +23,40 @@ _seed = os.getenv("VK_SEED", "").strip()
 if _seed:
     random.seed(int(_seed))
 
-# USDA minimum safe internal temp for red-meat steaks/roasts, in Celsius
-# (145 F, plus a 3-minute rest). Matches the reference comment in
-# pseudo-oasis/schemas/grill_red_meat.yaml. Ground red meat is higher (~71 C)
+# Minimum safe internal temp per meat, in Celsius. USDA-style references, and
+# consistent with the comments in pseudo-oasis's grill schema YAMLs:
+# red meat / fish ~63 C (145 F), poultry ~74 C (165 F). Ground meat is higher
 # and out of scope.
-SAFE_TEMP_RED_MEAT = 63.0
+SAFE_TEMP = {"red_meat": 63.0, "poultry": 74.0, "fish": 63.0}
+SAFE_TEMP_RED_MEAT = SAFE_TEMP["red_meat"]  # kept: referenced by the web layer
 
 # How aggressively each heat source browns the surface.
 HEAT_FACTOR = {"grill": 1.0, "pan": 0.7, "oven": 0.35}
 
-# "Most people like it here" score, keyed by the doneness label.
-DONENESS_PREF = {
-    "rare": 70,
-    "medium_rare": 90,
-    "medium": 95,
-    "medium_well": 80,
-    "well_done": 60,
+# Doneness bands per meat: (upper temp, label, quality preference 0-100).
+# The temps are culinary references; the preference is "how much people like
+# it there" and feeds quality_score. Poultry has no "rare" band, fish is done
+# at a lower temp than red meat.
+DONENESS_BANDS = {
+    "red_meat": [(52, "rare", 70), (57, "medium_rare", 90), (63, "medium", 95),
+                 (69, "medium_well", 80), (999, "well_done", 60)],
+    "poultry":  [(70, "underdone", 25), (78, "just_done", 92), (85, "cooked_through", 85),
+                 (92, "well_done", 68), (999, "dry", 40)],
+    "fish":     [(48, "rare", 60), (54, "medium_rare", 88), (60, "medium", 92),
+                 (68, "well_done", 70), (999, "overcooked", 40)],
 }
+
+# Juiciness: moisture loss starts at `knee` C and then falls `slope` points/C.
+# Poultry breast holds moisture until it is done, then dries fast; fish is
+# delicate and dries very fast once past its knee.
+JUICINESS_CURVE = {"red_meat": (54, 2.2), "poultry": (68, 3.0), "fish": (52, 3.5)}
+
+# Fish chars and scorches faster than red meat; poultry skin browns readily.
+CHAR_SENSITIVITY = {"red_meat": 1.0, "poultry": 1.05, "fish": 1.15}
 
 # Plausible operating ranges for the two grill inputs. Values outside these are
 # clamped in, so a formula never sees a wild number.
-TEMP_RANGE = (40.0, 90.0)
+TEMP_RANGE = (35.0, 100.0)
 DURATION_RANGE = (1.0, 120.0)
 
 
@@ -52,59 +68,61 @@ def _noise(lo, hi):
     return random.uniform(lo, hi)
 
 
-def doneness(internal_temp_celsius):
-    """Steak doneness band read straight off internal temp. No noise: it is a
-    label, not a measurement."""
+def _doneness(internal_temp_celsius, kind):
     t = _clamp(internal_temp_celsius, *TEMP_RANGE)
-    if t < 52:
-        return "rare"
-    if t < 57:
-        return "medium_rare"
-    if t < 63:
-        return "medium"
-    if t < 69:
-        return "medium_well"
-    return "well_done"
+    for upper, label, pref in DONENESS_BANDS[kind]:
+        if t < upper:
+            return label, pref
+    label, pref = DONENESS_BANDS[kind][-1][1], DONENESS_BANDS[kind][-1][2]
+    return label, pref
 
 
-def food_safety_score(internal_temp_celsius):
-    """Logistic curve centred on the 63 C reference (scale 2.5 C): collapses
-    below it, saturates high above it. This is the outcome where the real
-    domain rule matters most for demo credibility."""
+def doneness(internal_temp_celsius, kind="red_meat"):
+    """Doneness band read straight off internal temp. No noise: it is a label,
+    not a measurement."""
+    return _doneness(internal_temp_celsius, kind)[0]
+
+
+def food_safety_score(internal_temp_celsius, safe_temp=SAFE_TEMP_RED_MEAT):
+    """Logistic curve centred on the meat's safe internal temp (scale 2.5 C):
+    collapses below it, saturates high above it. This is the outcome where the
+    real domain rule matters most for demo credibility."""
     t = _clamp(internal_temp_celsius, *TEMP_RANGE)
-    raw = 100.0 / (1.0 + math.exp(-(t - SAFE_TEMP_RED_MEAT) / 2.5))
+    raw = 100.0 / (1.0 + math.exp(-(t - safe_temp) / 2.5))
     return round(_clamp(raw + _noise(-2, 2)), 1)
 
 
-def char_level(internal_temp_celsius, heat_source, duration_minutes):
+def char_level(internal_temp_celsius, heat_source, duration_minutes, kind="red_meat"):
     """Surface Maillard + burning: mostly cook time and how hot the source
-    runs, a little from peak temp."""
+    runs, a little from peak temp, scaled by how easily the meat chars."""
     t = _clamp(internal_temp_celsius, *TEMP_RANGE)
     d = _clamp(duration_minutes, *DURATION_RANGE)
-    factor = HEAT_FACTOR.get(heat_source, 0.7)
+    factor = HEAT_FACTOR.get(heat_source, 0.7) * CHAR_SENSITIVITY[kind]
     raw = factor * (1.1 * d + 0.6 * max(t - 55, 0))
     return round(_clamp(raw + _noise(-4, 4)), 1)
 
 
-def juiciness_score(internal_temp_celsius, heat_source, duration_minutes):
-    """Moisture loss rises with internal temp (steep past ~54 C) and with
-    total cook time. Gentle oven convection keeps a touch more."""
+def juiciness_score(internal_temp_celsius, heat_source, duration_minutes, kind="red_meat"):
+    """Moisture loss rises past the meat's knee temp and with total cook time.
+    Gentle oven convection keeps a touch more."""
     t = _clamp(internal_temp_celsius, *TEMP_RANGE)
     d = _clamp(duration_minutes, *DURATION_RANGE)
+    knee, slope = JUICINESS_CURVE[kind]
     source_bonus = {"grill": 0, "pan": 0, "oven": 4}.get(heat_source, 0)
-    raw = 100.0 - 2.2 * max(t - 54, 0) - 0.35 * d + source_bonus
+    raw = 100.0 - slope * max(t - knee, 0) - 0.35 * d + source_bonus
     return round(_clamp(raw + _noise(-3, 3)), 1)
 
 
-def quality_score(food_safety, juiciness, char, doneness_label):
-    """Composite: weighted blend of the other three outcomes plus a doneness
-    preference. Unsafe food caps the overall score."""
+def quality_score(food_safety, juiciness, char, doneness_pref):
+    """Composite: weighted blend of the other three outcomes plus the doneness
+    preference (0-100, from DONENESS_BANDS). Unsafe food caps the overall
+    score."""
     char_fit = _clamp(100.0 - 1.5 * abs(char - 35))
     raw = (
         0.30 * food_safety
         + 0.35 * juiciness
         + 0.20 * char_fit
-        + 0.15 * DONENESS_PREF.get(doneness_label, 75)
+        + 0.15 * doneness_pref
     )
     q = _clamp(raw + _noise(-3, 3))
     if food_safety < 50:
@@ -112,21 +130,33 @@ def quality_score(food_safety, juiciness, char, doneness_label):
     return round(q, 1)
 
 
-def grill_red_meat_outcome(internal_temp_celsius, heat_source, duration_minutes):
-    """Run the full grill_red_meat outcome block. Order matters: quality
-    consumes the other four."""
-    done = doneness(internal_temp_celsius)
-    safety = food_safety_score(internal_temp_celsius)
-    char = char_level(internal_temp_celsius, heat_source, duration_minutes)
-    juice = juiciness_score(internal_temp_celsius, heat_source, duration_minutes)
-    quality = quality_score(safety, juice, char, done)
+def _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, kind):
+    """Shared grilling-bench outcome block. Order matters: quality consumes the
+    other four."""
+    label, pref = _doneness(internal_temp_celsius, kind)
+    safety = food_safety_score(internal_temp_celsius, SAFE_TEMP[kind])
+    char = char_level(internal_temp_celsius, heat_source, duration_minutes, kind)
+    juice = juiciness_score(internal_temp_celsius, heat_source, duration_minutes, kind)
+    quality = quality_score(safety, juice, char, pref)
     return {
-        "doneness": done,
+        "doneness": label,
         "char_level": char,
         "juiciness_score": juice,
         "food_safety_score": safety,
         "quality_score": quality,
     }
+
+
+def grill_red_meat_outcome(internal_temp_celsius, heat_source, duration_minutes):
+    return _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, "red_meat")
+
+
+def grill_poultry_outcome(internal_temp_celsius, heat_source, duration_minutes):
+    return _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, "poultry")
+
+
+def grill_fish_outcome(internal_temp_celsius, heat_source, duration_minutes):
+    return _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, "fish")
 
 
 # --- fermentation bench: wine -------------------------------------------------
@@ -355,36 +385,54 @@ def fermentation_beer_outcome(starting_gravity, final_gravity, fermentation_days
 if __name__ == "__main__":
     random.seed(0)
 
-    # doneness bands
+    # doneness bands (red meat)
     assert doneness(48) == "rare", doneness(48)
     assert doneness(54) == "medium_rare", doneness(54)
     assert doneness(60) == "medium", doneness(60)
     assert doneness(66) == "medium_well", doneness(66)
     assert doneness(75) == "well_done", doneness(75)
+    # poultry / fish bands differ
+    assert doneness(60, "poultry") == "underdone", doneness(60, "poultry")
+    assert doneness(76, "poultry") == "just_done", doneness(76, "poultry")
+    assert doneness(50, "fish") == "medium_rare", doneness(50, "fish")
+    assert doneness(75, "fish") == "overcooked", doneness(75, "fish")
 
-    # food safety collapses below 63 C, saturates above it
-    assert food_safety_score(55) < 20, food_safety_score(55)
-    assert food_safety_score(75) > 95, food_safety_score(75)
-    assert 40 < food_safety_score(63) < 60, food_safety_score(63)
+    # food safety collapses below the safe temp, saturates above it, per meat
+    assert food_safety_score(55, SAFE_TEMP["red_meat"]) < 20
+    assert food_safety_score(75, SAFE_TEMP["red_meat"]) > 95
+    # 68 C is safe for red meat/fish but still unsafe for poultry (74 C)
+    assert food_safety_score(68, SAFE_TEMP["fish"]) > 85
+    assert food_safety_score(68, SAFE_TEMP["poultry"]) < 25
 
-    # juiciness falls as the steak goes from rare to overcooked
-    juicy_rare = juiciness_score(55, "grill", 15)
-    juicy_burnt = juiciness_score(80, "grill", 60)
-    assert juicy_rare > juicy_burnt, (juicy_rare, juicy_burnt)
+    # juiciness falls as the meat goes from just-cooked to overcooked
+    assert juiciness_score(55, "grill", 15, "red_meat") > juiciness_score(80, "grill", 60, "red_meat")
+    # fish dries faster than red meat past its knee
+    fish_drop = juiciness_score(55, "grill", 15, "fish") - juiciness_score(72, "grill", 15, "fish")
+    meat_drop = juiciness_score(55, "grill", 15, "red_meat") - juiciness_score(72, "grill", 15, "red_meat")
+    assert fish_drop > meat_drop, (fish_drop, meat_drop)
 
     # char rises with time and with a hotter source
     assert char_level(60, "grill", 45) > char_level(60, "oven", 10)
 
-    # every numeric outcome stays inside 0-100 across the input grid
-    for t in range(40, 91, 5):
-        for src in ("grill", "pan", "oven"):
-            for d in (1, 20, 60, 120):
-                out = grill_red_meat_outcome(t, src, d)
-                for k in ("char_level", "juiciness_score", "food_safety_score", "quality_score"):
-                    assert 0.0 <= out[k] <= 100.0, (t, src, d, k, out[k])
+    # every numeric outcome stays inside 0-100 across the input grid, all meats
+    for meat, fn in (("red_meat", grill_red_meat_outcome),
+                     ("poultry", grill_poultry_outcome),
+                     ("fish", grill_fish_outcome)):
+        for t in range(35, 101, 5):
+            for src in ("grill", "pan", "oven"):
+                for d in (1, 20, 60, 120):
+                    out = fn(t, src, d)
+                    for k in ("char_level", "juiciness_score", "food_safety_score", "quality_score"):
+                        assert 0.0 <= out[k] <= 100.0, (meat, t, src, d, k, out[k])
+                    assert out["doneness"] in {lbl for _, lbl, _ in DONENESS_BANDS[meat]}
+
+    # an undercooked chicken scores badly on safety and overall
+    raw_bird = grill_poultry_outcome(63, "grill", 20)
+    assert raw_bird["food_safety_score"] < 20, raw_bird
+    assert raw_bird["quality_score"] <= raw_bird["food_safety_score"], raw_bird
 
     # unsafe food caps quality
-    capped = quality_score(food_safety=8.0, juiciness=95.0, char=35.0, doneness_label="medium_rare")
+    capped = quality_score(food_safety=8.0, juiciness=95.0, char=35.0, doneness_pref=90)
     assert capped <= 8.0, capped
 
     # --- wine ---

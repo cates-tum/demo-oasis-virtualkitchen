@@ -21,8 +21,20 @@ BENCHES = {
     "grill_red_meat": {
         "bench": "Grilling",
         "type_label": "Red meat",
-        "blurb": "Steak or roast on a grill, pan, or in the oven. Outcome from "
-                 "food-safety temp curves and time/heat browning.",
+        "blurb": "Steak or roast on a grill, pan, or in the oven. Safety pivots "
+                 "on the ~63 C red-meat minimum.",
+    },
+    "grill_poultry": {
+        "bench": "Grilling",
+        "type_label": "Poultry",
+        "blurb": "Chicken or turkey on a grill, pan, or oven. Safety pivots on "
+                 "the higher ~74 C poultry minimum; breast dries fast past done.",
+    },
+    "grill_fish": {
+        "bench": "Grilling",
+        "type_label": "Fish",
+        "blurb": "Fish fillet or steak on a grill, pan, or oven. Delicate: "
+                 "juiciness falls fast past ~52 C, safe at ~63 C.",
     },
     "fermentation_wine": {
         "bench": "Fermentation",
@@ -42,8 +54,7 @@ BENCHES = {
 # field definitions. Field names / types / required / enum come from
 # pseudo-oasis per request; an `enum` field renders as a dropdown with no hint.
 HINTS = {
-    # grilling
-    "internal_temp_celsius": {"widget": "slider", "min": 40, "max": 90, "step": 0.5, "default": 60},
+    # grilling (internal_temp_celsius default is per meat, see _field_hint)
     "duration_minutes": {"widget": "slider", "min": 1, "max": 120, "step": 1, "default": 20},
     "temperature_celsius": {"widget": "slider", "min": 100, "max": 300, "step": 5, "default": 220},
     # fermentation (shared by wine + beer; yeast_strain is handled per type below)
@@ -80,6 +91,10 @@ def _field_hint(name, schema_type):
     if name == "cooking_method":
         default = "fermenting" if schema_type.startswith("fermentation_") else "grilling"
         return {"widget": "text", "datalist": COOKING_METHODS, "default": default}
+    if name == "internal_temp_celsius":
+        # start each meat's slider near a sensible target for that meat
+        default = {"grill_red_meat": 60, "grill_poultry": 74, "grill_fish": 58}.get(schema_type, 63)
+        return {"widget": "slider", "min": 40, "max": 100, "step": 0.5, "default": default}
     return HINTS.get(name, {})
 
 
@@ -135,13 +150,19 @@ def _render_form(request, schema_type, values, error=None, status=200):
     return templates.TemplateResponse(request, "form.html", ctx, status_code=status)
 
 
+_GRILL_MEAT = {"grill_red_meat": ("red meat", "red_meat"),
+               "grill_poultry": ("poultry", "poultry"),
+               "grill_fish": ("fish", "fish")}
+
+
 def _result_note(schema_type, outcome, inputs):
-    if schema_type == "grill_red_meat":
+    if schema_type in _GRILL_MEAT:
+        noun, kind = _GRILL_MEAT[schema_type]
         t = inputs.get("internal_temp_celsius")
-        safe = generator.formulas.SAFE_TEMP_RED_MEAT
+        safe = formulas.SAFE_TEMP[kind]
         below = outcome.get("food_safety_score", 100) < 50
-        return (f"food_safety_score is a logistic curve on the ~{safe} C USDA "
-                f"minimum safe internal temp for red meat. {t} C "
+        return (f"food_safety_score is a logistic curve on the ~{safe:g} C safe "
+                f"internal temp for {noun}. {t} C "
                 + ("sits below that reference, so the score is low by design."
                    if below else "clears that reference."))
     if schema_type == "fermentation_wine":

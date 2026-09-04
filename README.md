@@ -7,17 +7,19 @@ result back as an entry.
 
 `pseudo-oasis` must be running first. This app stores nothing itself.
 
-## Scope so far
+## Scope
 
-Three bench types wired end to end:
+All five bench types wired end to end:
 
 - **grilling / red meat** (`grill_red_meat`)
+- **grilling / poultry** (`grill_poultry`)
+- **grilling / fish** (`grill_fish`)
 - **fermentation / wine** (`fermentation_wine`)
 - **fermentation / beer** (`fermentation_beer`)
 
 The landing page lists them; each is `GET /form/<schema_type>` ->
-`POST /run/<schema_type>`. Poultry and fish formulas are not written yet.
-The wired list is exactly the keys of `engine.generator.OUTCOME_FORMULAS`.
+`POST /run/<schema_type>`. The wired list is exactly the keys of
+`engine.generator.OUTCOME_FORMULAS`.
 
 ## Run it
 
@@ -40,8 +42,8 @@ Then open http://localhost:8001.
 
 ```
 engine/
-  formulas.py     grill + wine + beer outcome math, noise/clamp helpers,
-                  beer yeast table
+  formulas.py     grilling (red meat / poultry / fish) + wine + beer outcome
+                  math, per-meat tables, noise/clamp helpers, beer yeast table
   wine_model.py   UCI-fit wine quality coefficients + wine yeast profiles
   generator.py    schema fields + form values -> POST /entries payload
 web/
@@ -75,23 +77,35 @@ collect: `outcome` (computed), `ingredients` (list type), `temperature_celsius`
 (no wired formula reads it), and `duration_minutes` on fermentation forms only
 (grilling still uses it).
 
-## grill_red_meat outcome formulas
+## grilling bench outcome formulas (red meat, poultry, fish)
 
-Inputs: `internal_temp_celsius` (clamped 40-90), `heat_source`
-(grill / pan / oven), `duration_minutes` (clamped 1-120). Every numeric output
-is `formula + bounded noise`, then clamped to 0-100.
+The three grilling types share one outcome block, parametrised per meat.
+Inputs: `internal_temp_celsius` (T, clamped 35-100), `heat_source`
+(grill / pan / oven), `duration_minutes` (D, clamped 1-120). Every numeric
+output is `formula + bounded noise`, then clamped to 0-100.
 
 | output | logic | noise |
 |---|---|---|
-| `doneness` | temp bands: <52 rare, <57 medium_rare, <63 medium, <69 medium_well, else well_done | none |
-| `food_safety_score` | `100 / (1 + exp(-(T - 63) / 2.5))`. Logistic curve on the USDA ~63 C red-meat minimum: collapses below it, saturates above it | +/- 2 |
-| `char_level` | `heat_factor * (1.1*D + 0.6*max(T-55, 0))`, heat_factor grill 1.0 / pan 0.7 / oven 0.35 | +/- 4 |
-| `juiciness_score` | `100 - 2.2*max(T-54, 0) - 0.35*D (+4 if oven)` | +/- 3 |
+| `doneness` | temp bands per meat (see below) | none |
+| `food_safety_score` | `100 / (1 + exp(-(T - safe_temp) / 2.5))`: collapses below the meat's safe temp, saturates above it | +/- 2 |
+| `char_level` | `heat_factor * char_sensitivity * (1.1*D + 0.6*max(T-55, 0))`, heat_factor grill 1.0 / pan 0.7 / oven 0.35 | +/- 4 |
+| `juiciness_score` | `100 - slope*max(T - knee, 0) - 0.35*D (+4 if oven)` | +/- 3 |
 | `quality_score` | `0.30*safety + 0.35*juiciness + 0.20*char_fit + 0.15*doneness_pref`, then capped at `food_safety_score` when that is below 50 | +/- 3 |
 
-A true medium-rare steak (57 C) scores low on `food_safety_score` on purpose:
-that is the USDA guideline talking, and it is the one number the demo needs to
-get right.
+Per-meat parameters (`engine/formulas.py`):
+
+| meat | safe_temp | juiciness knee / slope | char sensitivity | doneness bands (upper temp -> label) |
+|---|---|---|---|---|
+| red meat | 63 C | 54 / 2.2 | 1.00 | 52 rare, 57 medium_rare, 63 medium, 69 medium_well, else well_done |
+| poultry | 74 C | 68 / 3.0 | 1.05 | 70 underdone, 78 just_done, 85 cooked_through, 92 well_done, else dry |
+| fish | 63 C | 52 / 3.5 | 1.15 | 48 rare, 54 medium_rare, 60 medium, 68 well_done, else overcooked |
+
+Safe temps match the reference comments in `pseudo-oasis`'s grill schema YAMLs
+(red meat / fish ~63 C, poultry ~74 C). A true medium-rare steak (57 C), a
+50 C salmon, or a 63 C chicken all score low on `food_safety_score` on
+purpose: that is the food-safety rule talking, and it is the number the demo
+needs to get right. `doneness_pref` (a 0-100 "how much people like it there"
+value) is co-located with each doneness band and feeds `quality_score`.
 
 ## fermentation_wine outcome formulas
 

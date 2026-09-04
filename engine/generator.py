@@ -30,6 +30,12 @@ OUTCOME_FORMULAS = {
     "grill_red_meat": lambda d: formulas.grill_red_meat_outcome(
         d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20)
     ),
+    "grill_poultry": lambda d: formulas.grill_poultry_outcome(
+        d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20)
+    ),
+    "grill_fish": lambda d: formulas.grill_fish_outcome(
+        d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20)
+    ),
     "fermentation_wine": lambda d: formulas.fermentation_wine_outcome(
         d["starting_gravity"], d["final_gravity"], d["fermentation_days"], d["yeast_strain"]
     ),
@@ -115,6 +121,14 @@ if __name__ == "__main__":
         "doneness", "char_level", "juiciness_score", "food_safety_score", "quality_score"
     }
     assert entry["title"] == "Argentine red meat on grill (tester)", entry["title"]
+
+    # poultry and fish reuse the same fields, different schema_type -> formula
+    for st, meat in (("grill_poultry", "poultry"), ("grill_fish", "fish")):
+        e = build_entry(st, fields, {**form, "internal_temp_celsius": "74"}, "tester")
+        assert set(e["data"]["outcome"]) == {
+            "doneness", "char_level", "juiciness_score", "food_safety_score", "quality_score"
+        }
+        assert e["title"] == f"Argentine {meat} on grill (tester)", e["title"]
 
     try:
         build_entry("grill_red_meat", fields, {"cuisine": "x"}, "t")
