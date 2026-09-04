@@ -6,6 +6,7 @@ import os
 import httpx
 
 OASIS_URL = os.getenv("OASIS_URL", "http://localhost:8000").rstrip("/")
+OASIS_PUBLIC_URL = os.getenv("OASIS_PUBLIC_URL", OASIS_URL).rstrip("/")
 TIMEOUT = 10.0
 
 
@@ -89,7 +90,7 @@ def post_entry(schema_type, title, submitted_by, data):
 def entry_url(entry_id):
     """Where a visitor can see the pushed entry. pseudo-oasis has no explorer
     UI yet, so this points at the raw JSON endpoint; swap when one exists."""
-    return f"{OASIS_URL}/entries/{entry_id}"
+    return f"{OASIS_PUBLIC_URL}/entries/{entry_id}"
 
 
 if __name__ == "__main__":

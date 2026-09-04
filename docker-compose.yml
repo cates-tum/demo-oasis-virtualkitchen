@@ -1,0 +1,16 @@
+services:
+  web:
+    build: .
+    environment:
+      OASIS_URL: http://demo-oasis-platform-api-1:8000
+      OASIS_PUBLIC_URL: https://econversion-kitchen.duckdns.org
+      ROOT_PATH: /kitchen
+    ports:
+      - "8081:8000"
+    volumes:
+      - .:/app
+    networks:
+      - demo-oasis-net
+networks:
+  demo-oasis-net:
+    external: true
