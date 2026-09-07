@@ -1,15 +1,84 @@
 {% extends "base.html" %}
-{% block content %}
-<h1>virtual-kitchen</h1>
-<p class="sub">Pick a bench type. The form is built from pseudo-oasis's schema,
-the outcome from a formula-based rule engine, and the result is pushed back as
-an entry.</p>
 
-{% for c in cards %}
-<div style="border:1px solid GrayText; border-radius:8px; padding:1rem; margin-bottom:1rem">
-  <h2 style="font-size:1.1rem; margin:0 0 .25rem">{{ c.bench }} &rarr; {{ c.type_label }}</h2>
-  <p class="note" style="margin:.25rem 0 .75rem">{{ c.blurb }}</p>
-  <a class="button" href="{{ url_for('form', schema_type=c.schema_type) }}"><button type="button">Open form</button></a>
+{% macro grill_base() -%}
+  <path d="M7 27h34"/>
+  <path d="M10 27q14 11 28 0"/>
+  <path d="M13 39l-4 6M24 40v6M35 39l4 6"/>
+  <path d="M13 27v-4M19 27v-5M25 27v-5M31 27v-5M37 27v-4"/>
+{%- endmacro %}
+
+{% macro bench_icon(kind) -%}
+<svg class="bench-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor"
+     stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+{%- if kind == "fermentation_wine" -%}
+  <path d="M21 7h6v4q6 3 6 11v13q0 5-5 5h-8q-5 0-5-5V22q0-8 6-11z"/>
+  <path d="M24 7V5h3q2 0 2 2t-2 2"/>
+  <path d="M17 25q7 3 14 0"/>
+{%- elif kind == "fermentation_beer" -%}
+  <path d="M15 12h18v10l-9 15-9-15z"/>
+  <path d="M15 12q9-5 18 0"/>
+  <path d="M24 7V4h3"/>
+  <path d="M18 26l-4 8M30 26l4 8M24 37v5"/>
+{%- elif kind == "grill_red_meat" -%}
+  {{ grill_base() }}
+  <ellipse cx="24" cy="18" rx="8" ry="3.6"/>
+  <path d="M20 18h8"/>
+{%- elif kind == "grill_poultry" -%}
+  {{ grill_base() }}
+  <circle cx="21" cy="17" r="4.2"/>
+  <path d="M24 19l6 3M30 22l2-2M30 22l-1 3"/>
+{%- elif kind == "grill_fish" -%}
+  {{ grill_base() }}
+  <path d="M15 18q8-6 15 0q-7 6-15 0z"/>
+  <path d="M15 18l-4-4M15 18l-4 4"/>
+  <circle cx="27" cy="16.5" r="0.8"/>
+{%- else -%}
+  <path d="M20 6h8M22 6v9l-8 20a3 3 0 0 0 3 4h14a3 3 0 0 0 3-4l-8-20V6"/>
+  <path d="M17 28h14"/>
+{%- endif -%}
+</svg>
+{%- endmacro %}
+
+{% macro bench_card(href, schema_type, name, desc) -%}
+<a class="bench-card" href="{{ href }}">
+  {{ bench_icon(schema_type) }}
+  <span class="bench-card-body">
+    <span class="bench-card-name">{{ name }}</span>
+    <span class="bench-card-desc">{{ desc }}</span>
+    <span class="bench-card-type">{{ schema_type }}</span>
+  </span>
+</a>
+{%- endmacro %}
+
+{% set names = {
+  "fermentation_wine": "Wine fermenter",
+  "fermentation_beer": "Beer fermenter",
+  "grill_red_meat": "Red-meat grill",
+  "grill_poultry": "Poultry grill",
+  "grill_fish": "Fish grill"
+} %}
+{% set descs = {
+  "fermentation_wine": "Ferment must into wine; quality scored from a wine dataset.",
+  "fermentation_beer": "Ferment wort into beer; real ABV and IBU homebrew math.",
+  "grill_red_meat": "Grill red meat against the 63 C food-safety line.",
+  "grill_poultry": "Grill poultry against the 74 C food-safety line.",
+  "grill_fish": "Grill fish against the 63 C line; juiciness drops past 52 C."
+} %}
+{% set featured = ["fermentation_wine", "fermentation_beer", "grill_red_meat", "grill_poultry", "grill_fish"] %}
+{% set shown = cards | map(attribute="schema_type") | list %}
+
+{% block content %}
+<h1>Pick a bench</h1>
+<p class="sub">Each bench builds its form from the Nexus schema, runs a
+formula-based rule engine, and pushes the result back as an entry.</p>
+
+<div class="bench-cards">
+  {% for st in featured if st in shown %}
+    {% set c = cards | selectattr("schema_type", "equalto", st) | first %}
+    {{ bench_card(url_for('form', schema_type=st), st, names.get(st, c.type_label), descs.get(st, c.blurb)) }}
+  {% endfor %}
+  {% for c in cards if c.schema_type not in featured %}
+    {{ bench_card(url_for('form', schema_type=c.schema_type), c.schema_type, c.type_label, c.blurb) }}
+  {% endfor %}
 </div>
-{% endfor %}
 {% endblock %}

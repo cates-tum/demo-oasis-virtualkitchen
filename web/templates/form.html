@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% macro field(f) %}
-  <div>
+  <div class="field">
     <label for="{{ f.name }}">{{ f.label }}{% if f.required %} <span class="req">*</span>{% endif %}</label>
     {% if f.widget == "slider" %}
       <input type="range" id="{{ f.name }}" name="{{ f.name }}"
@@ -30,10 +30,10 @@
 {% endmacro %}
 
 {% block content %}
-<p class="crumbs"><a href="{{ url_for('index') }}">&larr; Benches</a></p>
+<p class="crumbs"><a href="{{ url_for('index') }}">Back to benches</a></p>
 <h1>Run a {{ bench|lower }} experiment</h1>
-<p class="sub">{{ bench }} bench &rarr; {{ type_label|lower }}. Fields come live from
-pseudo-oasis's <code>{{ schema_type }}</code> schema.</p>
+<p class="sub">{{ bench }} bench, {{ type_label|lower }}. Fields from the Nexus schema
+<code>{{ schema_type }}</code>.</p>
 
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
 
@@ -43,7 +43,7 @@ pseudo-oasis's <code>{{ schema_type }}</code> schema.</p>
 <form method="post" action="{{ url_for('run', schema_type=schema_type) }}">
   <fieldset>
     <legend>General</legend>
-    <div>
+    <div class="field">
       <label for="nickname">Nickname <span class="note">(shown as submitter)</span></label>
       <input type="text" id="nickname" name="nickname" value="{{ nickname }}" placeholder="e.g. Samwise Gamgee">
     </div>
@@ -55,7 +55,7 @@ pseudo-oasis's <code>{{ schema_type }}</code> schema.</p>
     {% for f in specific %}{{ field(f) }}{% endfor %}
   </fieldset>
 
-  <button type="submit">Run experiment</button>
+  <button type="submit">Run and push to Nexus</button>
 </form>
 {% endif %}
 {% endblock %}

@@ -1,5 +1,5 @@
 """Guided-form web UI. Pick a wired bench type, fill a form built from
-pseudo-oasis's schema for it, run the rule engine, push the entry, see the
+Nexus's schema for it, run the rule engine, push the entry, see the
 outcome.
 
 Wired types are exactly the keys of engine.generator.OUTCOME_FORMULAS.
@@ -52,7 +52,7 @@ BENCHES = {
 
 # Local UI hints only: slider bounds and datalists. Widget ergonomics, not
 # field definitions. Field names / types / required / enum come from
-# pseudo-oasis per request; an `enum` field renders as a dropdown with no hint.
+# Nexus per request; an `enum` field renders as a dropdown with no hint.
 HINTS = {
     # grilling (internal_temp_celsius default is per meat, see _field_hint)
     "duration_minutes": {"widget": "slider", "min": 1, "max": 120, "step": 1, "default": 20},
@@ -71,8 +71,9 @@ HINTS = {
 
 COOKING_METHODS = ["grilling", "searing", "roasting", "fermenting"]
 
-app = FastAPI(title="virtual-kitchen")
+app = FastAPI(title="e-kitchen")
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
+templates.env.globals["nexus_url"] = client.OASIS_PUBLIC_URL
 
 
 def _require_wired(schema_type):
@@ -145,7 +146,7 @@ def _render_form(request, schema_type, values, error=None, status=200):
         ctx["fields"] = _fields_for_form(schema_type, values)
     except client.OasisUnavailable as e:
         ctx["fields"] = []
-        ctx["error"] = f"Cannot reach pseudo-oasis: {e}"
+        ctx["error"] = f"Cannot reach Nexus: {e}"
         status = 503
     return templates.TemplateResponse(request, "form.html", ctx, status_code=status)
 

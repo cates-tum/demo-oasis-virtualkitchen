@@ -1,9 +1,9 @@
 """Orchestrates one experiment run: take the schema field list fetched from
-pseudo-oasis plus the submitted form values, run the matching formula, and
+Nexus plus the submitted form values, run the matching formula, and
 assemble the POST /entries payload.
 
 Generic on purpose: a field the schema declares but no formula knows about is
-still copied through, so a new config-only bench in pseudo-oasis can be pushed
+still copied through, so a new config-only bench in Nexus can be pushed
 without a code change here (it just won't get a bespoke `outcome`).
 """
 from engine import formulas

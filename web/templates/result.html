@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %} &middot; result{% endblock %}
+{% block title %} result{% endblock %}
 {% block content %}
-<h1>Experiment pushed</h1>
+<h1>Pushed to Nexus</h1>
 <p class="sub">{{ entry.title }}</p>
 
-<h2 style="font-size:1.1rem">Outcome</h2>
+<h2>Outcome</h2>
 <table>
   {% for k, v in outcome.items() %}
   <tr><th>{{ k }}</th><td>{{ v }}{% if v is number and k.endswith("_score") %} / 100{% endif %}</td></tr>
@@ -13,7 +13,7 @@
 
 {% if note %}<p class="note">{{ note }}</p>{% endif %}
 
-<h2 style="font-size:1.1rem">Inputs</h2>
+<h2>Inputs</h2>
 <table>
   {% for k, v in inputs.items() if k != "outcome" %}
   <tr><th>{{ k }}</th><td>{{ v }}</td></tr>
@@ -22,11 +22,9 @@
 
 <p>
   <a class="button" href="{{ entry_url }}" target="_blank" rel="noopener">
-    <button type="button">View entry in pseudo-oasis</button>
+    <button type="button">View in Nexus</button>
   </a>
-  <span class="note">entry id {{ entry.id }}</span>
 </p>
-<p class="note">pseudo-oasis has no explorer UI yet, so this opens the raw entry JSON.</p>
 
-<p><a href="{{ url_for('index') }}">&larr; Run another</a></p>
+<p><a href="{{ url_for('index') }}">Run another</a></p>
 {% endblock %}

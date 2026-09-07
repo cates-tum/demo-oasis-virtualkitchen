@@ -3,37 +3,100 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>virtual-kitchen{% block title %}{% endblock %}</title>
+<title>e-kitchen{% block title %}{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
 <style>
-  :root { color-scheme: light dark; }
-  body { font: 16px/1.5 system-ui, sans-serif; margin: 0; background: Canvas; color: CanvasText; }
-  main { max-width: 640px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
-  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
-  .sub { color: GrayText; margin: 0 0 1.5rem; }
-  form div { margin-bottom: 1.1rem; }
-  fieldset { border: 1px solid GrayText; border-radius: 8px; padding: 1rem 1rem .2rem;
-    margin: 0 0 1.25rem; }
-  legend { font-weight: 600; padding: 0 .4rem; }
-  label { display: block; font-weight: 600; margin-bottom: .3rem; }
-  label .req { color: #c0392b; }
-  input[type=text], input[type=number], select { width: 100%; padding: .5rem; font: inherit;
-    box-sizing: border-box; border: 1px solid GrayText; border-radius: 6px; background: Field; color: FieldText; }
-  input[type=range] { width: 100%; }
-  .rangeval { font-variant-numeric: tabular-nums; color: GrayText; }
-  button { font: inherit; font-weight: 600; padding: .6rem 1.2rem; border: 0; border-radius: 6px;
-    background: #2d7d46; color: #fff; cursor: pointer; }
-  .error { background: #fdecea; color: #611a15; border: 1px solid #f5c6cb; padding: .75rem 1rem;
-    border-radius: 6px; margin-bottom: 1.25rem; }
-  .crumbs { color: GrayText; font-size: .9rem; margin-bottom: 1rem; }
-  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
-  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid GrayText; }
-  .note { color: GrayText; font-size: .9rem; }
+  :root {
+    --paper: #FAFAF7;
+    --ink: #1B2430;
+    --accent: #3F5D52;
+    --accent-tint: #6E8B7F;
+    --hairline: #D8D6CC;
+    --muted: #5B6673;
+    --serif: "Source Serif 4", Georgia, serif;
+    --sans: "IBM Plex Sans", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 16px 48px; background: var(--paper); color: var(--ink);
+    font: 15px/1.55 var(--sans); }
+
+  .instrument { max-width: 560px; margin: 0 auto; border: 1px solid var(--ink);
+    background: var(--paper); }
+  .rack { padding: 12px 16px; border-bottom: 1px solid var(--ink); }
+  .rack .name { font: 600 13px/1 var(--sans); }
+  .rack .status { margin-top: 4px; font-size: 12px; color: var(--muted); }
+  .rack .status .endpoint { font-family: var(--mono); }
+  main { padding: 16px; }
+
+  h1 { font: 600 1.4rem/1.25 var(--serif); margin: 0 0 .3rem; }
+  h2 { font: 600 1.05rem/1.3 var(--serif); margin: 1.25rem 0 .4rem; }
+  p { font-family: var(--serif); margin: 0 0 1rem; }
+  .sub { color: var(--muted); }
+  .note { font-family: var(--sans); font-size: 13px; color: var(--muted); }
+  a { color: var(--accent); }
+  code { font-family: var(--mono); font-size: .92em; }
+
+  /* bench cards */
+  .bench-cards { display: grid; gap: 12px; margin-top: 1.25rem;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+  .bench-card { display: flex; align-items: flex-start; gap: 12px; padding: 14px;
+    border: 1px solid var(--ink); border-radius: 2px; background: #fff;
+    text-decoration: none; color: var(--ink); }
+  .bench-card:hover { border-color: var(--accent); }
+  .bench-card:hover .bench-card-name { color: var(--accent); }
+  .bench-icon { flex: none; width: 40px; height: 40px; }
+  .bench-card-body { display: flex; flex-direction: column; min-width: 0; }
+  .bench-card-name { font: 600 1rem/1.25 var(--serif); }
+  .bench-card-desc { margin-top: .2rem; font-family: var(--sans); font-size: 12.5px;
+    line-height: 1.4; color: var(--muted); }
+  .bench-card-type { margin-top: .45rem; font: 400 11px/1 var(--mono); color: var(--muted); }
+
+  /* form modules */
+  .crumbs { font-size: 13px; margin-bottom: 1rem; font-family: var(--sans); }
+  fieldset { border: 1px solid var(--hairline); border-radius: 2px; padding: 14px 16px;
+    margin: 0 0 24px; }
+  legend { font: 600 13px/1 var(--sans); padding: 0 6px; }
+  .field { margin-bottom: 12px; }
+  label { display: block; font: 600 13px/1.3 var(--sans); margin-bottom: 4px; }
+  label .req { color: var(--accent); }
+  label .note { font-weight: 400; }
+  input[type=text], input[type=number], select { width: 100%; padding: .45rem .5rem;
+    font: 14px var(--mono); border: 1px solid var(--ink); border-radius: 2px;
+    background: #fff; color: var(--ink); }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input[type=range] { width: 100%; accent-color: var(--accent-tint); }
+  .rangeval { display: block; text-align: right; margin-top: 2px; font-family: var(--mono);
+    font-size: 13px; color: var(--accent-tint); }
+
+  button { font: 600 14px var(--sans); padding: .6rem 1rem; border: 1px solid var(--accent);
+    border-radius: 2px; background: var(--accent); color: var(--paper); cursor: pointer; }
+  button:hover { background: #354f45; }
+  form > button[type=submit] { width: 100%; margin-top: 4px; }
   a.button { display: inline-block; text-decoration: none; }
+
+  /* result */
+  .error { border: 1px solid var(--accent); background: #fff; color: var(--ink);
+    padding: .7rem .9rem; border-radius: 2px; margin-bottom: 1.25rem;
+    font-family: var(--sans); font-size: 14px; }
+  table { border-collapse: collapse; width: 100%; margin: .5rem 0 1.25rem; }
+  th, td { text-align: left; padding: .45rem .5rem; border-bottom: 1px solid var(--hairline);
+    vertical-align: top; }
+  th { font: 400 13px/1.4 var(--mono); color: var(--ink); width: 50%; }
+  td { font: 600 13px/1.4 var(--mono); }
 </style>
 </head>
 <body>
-<main>
-{% block content %}{% endblock %}
-</main>
+<div class="instrument">
+  <header class="rack">
+    <div class="name">e-kitchen</div>
+    <div class="status">Connected to Nexus <span class="endpoint">{{ nexus_url }}</span></div>
+  </header>
+  <main>
+  {% block content %}{% endblock %}
+  </main>
+</div>
 </body>
 </html>

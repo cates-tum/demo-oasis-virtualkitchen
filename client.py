@@ -1,4 +1,4 @@
-"""Talks to pseudo-oasis: GET /schemas to learn field lists, POST /entries to
+"""Talks to Nexus: GET /schemas to learn field lists, POST /entries to
 push a generated experiment. This app keeps no schema copy of its own.
 """
 import os
@@ -11,11 +11,11 @@ TIMEOUT = 10.0
 
 
 class OasisUnavailable(RuntimeError):
-    """pseudo-oasis did not answer, or answered with an error."""
+    """Nexus did not answer, or answered with an error."""
 
 
 def ping():
-    """True if pseudo-oasis is reachable. Never raises."""
+    """True if Nexus is reachable. Never raises."""
     try:
         r = httpx.get(f"{OASIS_URL}/", timeout=3.0)
         return r.status_code == 200
@@ -83,12 +83,12 @@ def post_entry(schema_type, title, submitted_by, data):
     except httpx.HTTPError as e:
         raise OasisUnavailable(f"POST {OASIS_URL}/entries failed: {e}") from e
     if r.status_code != 201:
-        raise OasisUnavailable(f"pseudo-oasis rejected the entry ({r.status_code}): {r.text}")
+        raise OasisUnavailable(f"Nexus rejected the entry ({r.status_code}): {r.text}")
     return r.json()
 
 
 def entry_url(entry_id):
-    """Where a visitor can see the pushed entry. pseudo-oasis has no explorer
+    """Where a visitor can see the pushed entry. Nexus has no explorer
     UI yet, so this points at the raw JSON endpoint; swap when one exists."""
     return f"{OASIS_PUBLIC_URL}/entries/{entry_id}"
 

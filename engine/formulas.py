@@ -24,7 +24,7 @@ if _seed:
     random.seed(int(_seed))
 
 # Minimum safe internal temp per meat, in Celsius. USDA-style references, and
-# consistent with the comments in pseudo-oasis's grill schema YAMLs:
+# consistent with the comments in Nexus's grill schema YAMLs:
 # red meat / fish ~63 C (145 F), poultry ~74 C (165 F). Ground meat is higher
 # and out of scope.
 SAFE_TEMP = {"red_meat": 63.0, "poultry": 74.0, "fish": 63.0}
