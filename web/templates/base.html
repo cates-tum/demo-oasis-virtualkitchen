@@ -28,7 +28,6 @@
   .rack { padding: 12px 16px; border-bottom: 1px solid var(--ink); }
   .rack .name { font: 600 13px/1 var(--sans); }
   .rack .status { margin-top: 4px; font-size: 12px; color: var(--muted); }
-  .rack .status .endpoint { font-family: var(--mono); }
   main { padding: 16px; }
 
   h1 { font: 600 1.4rem/1.25 var(--serif); margin: 0 0 .3rem; }
@@ -41,7 +40,7 @@
 
   /* bench cards */
   .bench-cards { display: grid; gap: 12px; margin-top: 1.25rem;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+    grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); }
   .bench-card { display: flex; align-items: flex-start; gap: 12px; padding: 14px;
     border: 1px solid var(--ink); border-radius: 2px; background: #fff;
     text-decoration: none; color: var(--ink); }
@@ -104,16 +103,22 @@
     font-family: var(--sans); font-size: 14px; }
   table { border-collapse: collapse; width: 100%; margin: .5rem 0 1.25rem; }
   th, td { text-align: left; padding: .45rem .5rem; border-bottom: 1px solid var(--hairline);
-    vertical-align: top; }
+    vertical-align: top; overflow-wrap: anywhere; }
   th { font: 400 13px/1.4 var(--mono); color: var(--ink); width: 50%; }
   td { font: 600 13px/1.4 var(--mono); }
+
+  /* phone: 16px controls stop iOS focus-zoom; roomier tap targets */
+  @media (max-width: 480px) {
+    input[type=text], input[type=number], select { font-size: 16px; padding: .6rem .55rem; }
+    button { padding: .8rem 1rem; }
+  }
 </style>
 </head>
 <body>
 <div class="instrument">
   <header class="rack">
     <div class="name">e-kitchen</div>
-    <div class="status">Connected to Nexus <span class="endpoint">{{ nexus_url }}</span></div>
+    <div class="status">Connected to Nexus</div>
   </header>
   <main>
   {% block content %}{% endblock %}

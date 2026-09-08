@@ -51,6 +51,16 @@ If this app is served behind a proxy that strips a path prefix (e.g. Caddy's
 Set `ROOT_PATH=/kitchen` in the deploy environment; leave it unset for plain
 local dev, where links generate with no prefix as before.
 
+### Shared nickname with Nexus
+
+Both apps run on `econversion-kitchen.duckdns.org` (Caddy sends `/kitchen*`
+here with the prefix stripped, everything else to Nexus). The submitter
+nickname is a single cookie shared between them: name `nick`, value the bare
+nickname, `Path=/`, `HttpOnly`, `SameSite=lax`, one-year max age, matching what
+Nexus sets. `Path=/` (not `/kitchen`) is what makes it visible to both. A
+nickname set on either app prefills the submitter field on the bench forms
+here; it stays editable and is never required.
+
 ## Layout
 
 ```

@@ -13,7 +13,14 @@ from fastapi.templating import Jinja2Templates
 import client
 from engine import formulas, generator
 
-NICK_COOKIE = "vk_nick"
+# Shared identity with Nexus. Same cookie name, value format (bare nickname),
+# and attributes as Nexus sets on its /enter POST, verified against the live
+# response: `nick="<name>"; HttpOnly; Max-Age=31536000; Path=/; SameSite=lax`.
+# Caddy routes this app under `handle_path /kitchen*` (prefix stripped) on the
+# same host as Nexus, so Path must be "/" (not "/kitchen") for the cookie to be
+# sent to both apps.
+NICK_COOKIE = "nick"
+NICK_MAX_AGE = 60 * 60 * 24 * 365  # 31536000, matching Nexus
 
 # One card per wired type on the landing page. Only types that also have a
 # formula in generator.OUTCOME_FORMULAS are offered.
@@ -73,7 +80,6 @@ COOKING_METHODS = ["grilling", "searing", "roasting", "fermenting"]
 
 app = FastAPI(title="e-kitchen")
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
-templates.env.globals["nexus_url"] = client.OASIS_PUBLIC_URL
 
 
 def _require_wired(schema_type):
@@ -215,5 +221,6 @@ async def run(request: Request, schema_type: str, nickname: str = Form("")):
         "note": _result_note(schema_type, outcome, entry["data"]),
     })
     if nickname:
-        resp.set_cookie(NICK_COOKIE, nickname, max_age=60 * 60 * 24 * 30, samesite="lax")
+        resp.set_cookie(NICK_COOKIE, nickname, max_age=NICK_MAX_AGE, path="/",
+                        httponly=True, samesite="lax")
     return resp
