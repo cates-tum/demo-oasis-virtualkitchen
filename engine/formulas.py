@@ -54,6 +54,62 @@ JUICINESS_CURVE = {"red_meat": (54, 2.2), "poultry": (68, 3.0), "fish": (52, 3.5
 # Fish chars and scorches faster than red meat; poultry skin browns readily.
 CHAR_SENSITIVITY = {"red_meat": 1.0, "poultry": 1.05, "fish": 1.15}
 
+# Per-cut tuning for the grilling bench (schema field `grill_*.cut`). Two levers:
+#   ideal_temp  deg C where this cut eats best; feeds quality_score as a
+#               doneness-fit term. None -> fall back to the DONENESS_BANDS
+#               preference, i.e. no cut effect on quality.
+#   moisture    multiplier on the juiciness drying slope. >1 for a lean or thin
+#               cut that dries fast, <1 for a marbled or collagen-rich cut that
+#               holds. Safe internal temp is NOT a lever: it is per species
+#               (SAFE_TEMP), not per cut.
+# Keyed by kind then cut because a name like "tenderloin" or "whole" means
+# different things across benches. Unknown or blank cut -> DEFAULT_CUT_PROFILE,
+# so a cut added to the Nexus enum later still produces a sane entry with no
+# code change here.
+# ponytail: two levers, no per-cut knee shift or char factor; add one if the
+# demo needs a cut to visibly change char.
+DEFAULT_CUT_PROFILE = {"ideal_temp": None, "moisture": 1.0}
+CUT_PROFILE = {
+    "red_meat": {
+        "ribeye":     {"ideal_temp": 57, "moisture": 0.80},
+        "striploin":  {"ideal_temp": 55, "moisture": 0.95},
+        "sirloin":    {"ideal_temp": 54, "moisture": 1.05},
+        "tenderloin": {"ideal_temp": 54, "moisture": 1.25},
+        "flank":      {"ideal_temp": 54, "moisture": 1.30},
+        "skirt":      {"ideal_temp": 54, "moisture": 1.25},
+        "flat_iron":  {"ideal_temp": 56, "moisture": 1.00},
+        "tri_tip":    {"ideal_temp": 57, "moisture": 1.00},
+        "brisket":    {"ideal_temp": 92, "moisture": 0.70},
+        "short_rib":  {"ideal_temp": 90, "moisture": 0.70},
+        "lamb_chop":  {"ideal_temp": 58, "moisture": 0.95},
+        "pork_chop":  {"ideal_temp": 63, "moisture": 1.10},
+    },
+    "poultry": {
+        "breast":      {"ideal_temp": 74, "moisture": 1.35},
+        "thigh":       {"ideal_temp": 80, "moisture": 0.80},
+        "drumstick":   {"ideal_temp": 82, "moisture": 0.85},
+        "wing":        {"ideal_temp": 80, "moisture": 1.00},
+        "leg_quarter": {"ideal_temp": 82, "moisture": 0.80},
+        "tenderloin":  {"ideal_temp": 74, "moisture": 1.40},
+        "half":        {"ideal_temp": 78, "moisture": 1.00},
+        "whole":       {"ideal_temp": 78, "moisture": 0.95},
+    },
+    "fish": {
+        "fillet":  {"ideal_temp": 54, "moisture": 1.30},
+        "steak":   {"ideal_temp": 52, "moisture": 1.15},
+        "loin":    {"ideal_temp": 50, "moisture": 1.15},
+        "collar":  {"ideal_temp": 60, "moisture": 0.85},
+        "portion": {"ideal_temp": 55, "moisture": 1.15},
+        "whole":   {"ideal_temp": 58, "moisture": 0.95},
+    },
+}
+
+
+def cut_profile(kind, cut):
+    """Per-cut lever set for `kind`. Falls back to DEFAULT_CUT_PROFILE for a
+    blank or unrecognised cut."""
+    return CUT_PROFILE.get(kind, {}).get(cut or "", DEFAULT_CUT_PROFILE)
+
 # Plausible operating ranges for the two grill inputs. Values outside these are
 # clamped in, so a formula never sees a wild number.
 TEMP_RANGE = (35.0, 100.0)
@@ -102,14 +158,16 @@ def char_level(internal_temp_celsius, heat_source, duration_minutes, kind="red_m
     return round(_clamp(raw + _noise(-4, 4)), 1)
 
 
-def juiciness_score(internal_temp_celsius, heat_source, duration_minutes, kind="red_meat"):
+def juiciness_score(internal_temp_celsius, heat_source, duration_minutes, kind="red_meat",
+                    moisture=1.0):
     """Moisture loss rises past the meat's knee temp and with total cook time.
-    Gentle oven convection keeps a touch more."""
+    Gentle oven convection keeps a touch more. `moisture` scales the drying
+    slope per cut (>1 dries faster)."""
     t = _clamp(internal_temp_celsius, *TEMP_RANGE)
     d = _clamp(duration_minutes, *DURATION_RANGE)
     knee, slope = JUICINESS_CURVE[kind]
     source_bonus = {"grill": 0, "pan": 0, "oven": 4}.get(heat_source, 0)
-    raw = 100.0 - slope * max(t - knee, 0) - 0.35 * d + source_bonus
+    raw = 100.0 - slope * moisture * max(t - knee, 0) - 0.35 * d + source_bonus
     return round(_clamp(raw + _noise(-3, 3)), 1)
 
 
@@ -130,13 +188,19 @@ def quality_score(food_safety, juiciness, char, doneness_pref):
     return round(q, 1)
 
 
-def _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, kind):
+def _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, kind, cut=None):
     """Shared grilling-bench outcome block. Order matters: quality consumes the
-    other four."""
+    other four. `cut` (schema enum) shifts the doneness preference and the
+    drying rate; it never moves the food-safety reference."""
     label, pref = _doneness(internal_temp_celsius, kind)
+    prof = cut_profile(kind, cut)
+    if prof["ideal_temp"] is not None:
+        t = _clamp(internal_temp_celsius, *TEMP_RANGE)
+        pref = _clamp(100.0 - 2.0 * abs(t - prof["ideal_temp"]))
     safety = food_safety_score(internal_temp_celsius, SAFE_TEMP[kind])
     char = char_level(internal_temp_celsius, heat_source, duration_minutes, kind)
-    juice = juiciness_score(internal_temp_celsius, heat_source, duration_minutes, kind)
+    juice = juiciness_score(internal_temp_celsius, heat_source, duration_minutes, kind,
+                            prof["moisture"])
     quality = quality_score(safety, juice, char, pref)
     return {
         "doneness": label,
@@ -147,16 +211,16 @@ def _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, kind):
     }
 
 
-def grill_red_meat_outcome(internal_temp_celsius, heat_source, duration_minutes):
-    return _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, "red_meat")
+def grill_red_meat_outcome(internal_temp_celsius, heat_source, duration_minutes, cut=None):
+    return _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, "red_meat", cut)
 
 
-def grill_poultry_outcome(internal_temp_celsius, heat_source, duration_minutes):
-    return _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, "poultry")
+def grill_poultry_outcome(internal_temp_celsius, heat_source, duration_minutes, cut=None):
+    return _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, "poultry", cut)
 
 
-def grill_fish_outcome(internal_temp_celsius, heat_source, duration_minutes):
-    return _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, "fish")
+def grill_fish_outcome(internal_temp_celsius, heat_source, duration_minutes, cut=None):
+    return _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, "fish", cut)
 
 
 # --- fermentation bench: wine -------------------------------------------------
@@ -415,16 +479,35 @@ if __name__ == "__main__":
     assert char_level(60, "grill", 45) > char_level(60, "oven", 10)
 
     # every numeric outcome stays inside 0-100 across the input grid, all meats
+    # and every cut (plus no-cut and an unknown cut)
     for meat, fn in (("red_meat", grill_red_meat_outcome),
                      ("poultry", grill_poultry_outcome),
                      ("fish", grill_fish_outcome)):
+        cuts = [None, "no-such-cut"] + list(CUT_PROFILE[meat])
         for t in range(35, 101, 5):
             for src in ("grill", "pan", "oven"):
                 for d in (1, 20, 60, 120):
-                    out = fn(t, src, d)
-                    for k in ("char_level", "juiciness_score", "food_safety_score", "quality_score"):
-                        assert 0.0 <= out[k] <= 100.0, (meat, t, src, d, k, out[k])
-                    assert out["doneness"] in {lbl for _, lbl, _ in DONENESS_BANDS[meat]}
+                    for cut in cuts:
+                        out = fn(t, src, d, cut)
+                        for k in ("char_level", "juiciness_score", "food_safety_score", "quality_score"):
+                            assert 0.0 <= out[k] <= 100.0, (meat, t, src, d, cut, k, out[k])
+                        assert out["doneness"] in {lbl for _, lbl, _ in DONENESS_BANDS[meat]}
+
+    # cut moves quality and juiciness but never the food-safety reference
+    b_hot = grill_red_meat_outcome(90, "grill", 40, "brisket")
+    t_hot = grill_red_meat_outcome(90, "grill", 40, "tenderloin")
+    assert b_hot["quality_score"] > t_hot["quality_score"], (b_hot, t_hot)   # collagen cut likes 90 C
+    assert b_hot["food_safety_score"] > 95 and t_hot["food_safety_score"] > 95  # 90 C >> 63 C for both
+    breast = grill_poultry_outcome(85, "grill", 30, "breast")
+    thigh = grill_poultry_outcome(85, "grill", 30, "thigh")
+    assert breast["juiciness_score"] < thigh["juiciness_score"], (breast, thigh)
+
+    # blank / unknown cut == no cut effect (same noise seed -> identical result)
+    random.seed(7)
+    none_cut = grill_fish_outcome(55, "grill", 20, None)
+    random.seed(7)
+    bad_cut = grill_fish_outcome(55, "grill", 20, "not-a-cut")
+    assert none_cut == bad_cut, (none_cut, bad_cut)
 
     # an undercooked chicken scores badly on safety and overall
     raw_bird = grill_poultry_outcome(63, "grill", 20)

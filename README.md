@@ -94,8 +94,9 @@ collect: `outcome` (computed), `ingredients` (list type), `temperature_celsius`
 
 The three grilling types share one outcome block, parametrised per meat.
 Inputs: `internal_temp_celsius` (T, clamped 35-100), `heat_source`
-(grill / pan / oven), `duration_minutes` (D, clamped 1-120). Every numeric
-output is `formula + bounded noise`, then clamped to 0-100.
+(grill / pan / oven), `duration_minutes` (D, clamped 1-120), and `cut`
+(the schema enum for that bench, optional). Every numeric output is
+`formula + bounded noise`, then clamped to 0-100.
 
 | output | logic | noise |
 |---|---|---|
@@ -119,6 +120,22 @@ Safe temps match the reference comments in `pseudo-oasis`'s grill schema YAMLs
 purpose: that is the food-safety rule talking, and it is the number the demo
 needs to get right. `doneness_pref` (a 0-100 "how much people like it there"
 value) is co-located with each doneness band and feeds `quality_score`.
+
+### cut
+
+`cut` is a per-bench enum on the grill schemas, fetched at runtime like every
+other field. `CUT_PROFILE` in `engine/formulas.py` gives each cut two levers:
+
+- `ideal_temp` (deg C): where the cut eats best. Replaces the band
+  `doneness_pref` with `100 - 2*abs(T - ideal_temp)`, so brisket rewards a
+  90 C cook and tenderloin is punished for one.
+- `moisture`: multiplier on the juiciness drying slope. Lean or thin cuts
+  (breast 1.35, flank 1.30) dry faster; marbled or collagen cuts (ribeye
+  0.80, brisket 0.70) hold.
+
+`cut` never moves `food_safety_score`: the safe internal temp is per species,
+not per cut. A blank or unknown cut uses a neutral default (no quality shift,
+`moisture` 1.0), so a cut added to the Nexus enum later needs no code change.
 
 ## fermentation_wine outcome formulas
 

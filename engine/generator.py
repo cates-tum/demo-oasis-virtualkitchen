@@ -28,13 +28,13 @@ def skip_fields(schema_type):
 # schema_type -> function(data dict) -> outcome dict
 OUTCOME_FORMULAS = {
     "grill_red_meat": lambda d: formulas.grill_red_meat_outcome(
-        d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20)
+        d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20), d.get("cut")
     ),
     "grill_poultry": lambda d: formulas.grill_poultry_outcome(
-        d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20)
+        d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20), d.get("cut")
     ),
     "grill_fish": lambda d: formulas.grill_fish_outcome(
-        d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20)
+        d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20), d.get("cut")
     ),
     "fermentation_wine": lambda d: formulas.fermentation_wine_outcome(
         d["starting_gravity"], d["final_gravity"], d["fermentation_days"], d["yeast_strain"]
@@ -88,7 +88,8 @@ def _title(schema_type, data, nickname):
     who = f" ({nickname})" if nickname else ""
     cuisine = data.get("cuisine", "unspecified")
     if schema_type.startswith("grill_"):
-        cut = schema_type.removeprefix("grill_").replace("_", " ")
+        cut = data.get("cut") or schema_type.removeprefix("grill_")
+        cut = str(cut).replace("_", " ")
         src = data.get("heat_source", "heat")
         return f"{cuisine} {cut} on {src}{who}"
     if schema_type.startswith("fermentation_"):
@@ -106,6 +107,7 @@ if __name__ == "__main__":
         {"name": "outcome", "type": "object", "required": False},
         {"name": "internal_temp_celsius", "type": "number", "required": True},
         {"name": "heat_source", "type": "string", "required": True},
+        {"name": "cut", "type": "string", "required": False},
     ]
     form = {
         "cuisine": "Argentine",
@@ -113,22 +115,28 @@ if __name__ == "__main__":
         "internal_temp_celsius": "57",
         "heat_source": "grill",
         "duration_minutes": "18",
+        "cut": "ribeye",
     }
     entry = build_entry("grill_red_meat", fields, form, "tester")
     assert entry["schema_type"] == "grill_red_meat"
     assert entry["data"]["internal_temp_celsius"] == 57.0
+    assert entry["data"]["cut"] == "ribeye"
     assert set(entry["data"]["outcome"]) == {
         "doneness", "char_level", "juiciness_score", "food_safety_score", "quality_score"
     }
-    assert entry["title"] == "Argentine red meat on grill (tester)", entry["title"]
+    assert entry["title"] == "Argentine ribeye on grill (tester)", entry["title"]
+
+    # a cut left blank falls back to the meat kind in the title
+    no_cut = build_entry("grill_red_meat", fields, {k: v for k, v in form.items() if k != "cut"}, "t")
+    assert no_cut["title"] == "Argentine red meat on grill (t)", no_cut["title"]
 
     # poultry and fish reuse the same fields, different schema_type -> formula
-    for st, meat in (("grill_poultry", "poultry"), ("grill_fish", "fish")):
-        e = build_entry(st, fields, {**form, "internal_temp_celsius": "74"}, "tester")
+    for st, cut in (("grill_poultry", "thigh"), ("grill_fish", "fillet")):
+        e = build_entry(st, fields, {**form, "internal_temp_celsius": "74", "cut": cut}, "tester")
         assert set(e["data"]["outcome"]) == {
             "doneness", "char_level", "juiciness_score", "food_safety_score", "quality_score"
         }
-        assert e["title"] == f"Argentine {meat} on grill (tester)", e["title"]
+        assert e["title"] == f"Argentine {cut} on grill (tester)", e["title"]
 
     try:
         build_entry("grill_red_meat", fields, {"cuisine": "x"}, "t")
