@@ -140,9 +140,11 @@ not per cut. A blank or unknown cut uses a neutral default (no quality shift,
 ## fermentation_wine outcome formulas
 
 Inputs: `starting_gravity` (SG), `final_gravity` (FG), `fermentation_days` (D),
-`yeast_strain`. Strain profiles (`EC-1118`, `71B`, `D47`, `RC-212`, `K1-V1116`,
-else a default) live in `engine/wine_model.py`. Numeric outputs are
-`formula + bounded noise`, then clamped.
+`yeast_strain` (a schema enum, so the form renders it as a dropdown; the
+options are Nexus's, not this app's). Strain profiles keyed by that value
+(`va_bump`, `sulphates`, `aroma_base`, else a default) live in
+`engine/wine_model.py`. Numeric outputs are `formula + bounded noise`, then
+clamped.
 
 | output | logic | noise |
 |---|---|---|
@@ -170,10 +172,11 @@ into `wine_model.py`. That script is not imported by the app.
 ## fermentation_beer outcome formulas
 
 Inputs: `starting_gravity` (OG), `final_gravity` (FG), `fermentation_days` (D),
-`yeast_strain`, `hop_grams`, `hop_alpha_acid_percent` (AA), `boil_time_minutes`
-(t). Brewing yeast table (`US-05`, `S-04`, `WLP001`, `WB-06`, `T-58`, `W-34/70`,
-else a default) lives in `engine/formulas.py`. No dataset for beer: quality is
-rule-based, built on real homebrew relationships.
+`yeast_strain` (a schema enum, rendered as a dropdown from Nexus's options),
+`hop_grams`, `hop_alpha_acid_percent` (AA), `boil_time_minutes` (t). Brewing
+yeast table keyed by strain (`aroma_base`, `floc`, else a default) lives in
+`engine/formulas.py`. No dataset for beer: quality is rule-based, built on real
+homebrew relationships.
 
 | output | logic | noise |
 |---|---|---|

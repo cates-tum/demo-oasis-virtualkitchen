@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 import client
-from engine import formulas, generator, wine_model
+from engine import formulas, generator
 
 NICK_COOKIE = "vk_nick"
 
@@ -57,7 +57,7 @@ HINTS = {
     # grilling (internal_temp_celsius default is per meat, see _field_hint)
     "duration_minutes": {"widget": "slider", "min": 1, "max": 120, "step": 1, "default": 20},
     "temperature_celsius": {"widget": "slider", "min": 100, "max": 300, "step": 5, "default": 220},
-    # fermentation (shared by wine + beer; yeast_strain is handled per type below)
+    # fermentation (shared by wine + beer; yeast_strain is a schema enum -> dropdown)
     "fermentation_days": {"widget": "slider", "min": 3, "max": 90, "step": 1, "default": 21},
     "starting_gravity": {"widget": "slider", "min": 1.030, "max": 1.120, "step": 0.001, "default": 1.055},
     "final_gravity": {"widget": "slider", "min": 0.985, "max": 1.030, "step": 0.001, "default": 1.010},
@@ -84,11 +84,10 @@ def _require_wired(schema_type):
 def _field_hint(name, schema_type):
     """UI hint for one field. Most come from HINTS; a couple depend on the
     bench type."""
-    if name == "yeast_strain":
-        # brewing yeasts for beer, wine yeasts otherwise; free-text + datalist
-        strains = (list(formulas.BEER_YEAST) if schema_type == "fermentation_beer"
-                   else list(wine_model.STRAIN_PROFILES))
-        return {"widget": "text", "datalist": strains, "default": strains[0]}
+    # yeast_strain carries a schema enum now, so the generic enum -> <select>
+    # path handles it like cut. The formula strain profiles
+    # (formulas.BEER_YEAST, wine_model.STRAIN_PROFILES) stay internal, keyed by
+    # the same values, with a default for anything off-list.
     if name == "cooking_method":
         default = "fermenting" if schema_type.startswith("fermentation_") else "grilling"
         return {"widget": "text", "datalist": COOKING_METHODS, "default": default}
