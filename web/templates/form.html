@@ -57,5 +57,24 @@
 
   <button type="submit">Run and push to Nexus</button>
 </form>
+
+<div class="wait" id="wait" hidden>
+  <h2>Running experiment</h2>
+  <div class="gauge"><div class="gauge-fill"></div><div class="gauge-sweep"></div></div>
+  <p class="status">cooking experiment is ongoing...</p>
+</div>
+<script>
+  (function () {
+    var form = document.querySelector('form[method="post"]');
+    var wait = document.getElementById('wait');
+    if (!form || !wait) return;
+    form.addEventListener('submit', function (e) {
+      if (!form.checkValidity()) return;   // let the browser flag missing fields
+      e.preventDefault();
+      wait.hidden = false;
+      setTimeout(function () { form.submit(); }, 2000);
+    });
+  })();
+</script>
 {% endif %}
 {% endblock %}
