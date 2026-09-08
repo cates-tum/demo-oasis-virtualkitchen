@@ -112,6 +112,21 @@ def _fields_for_form(schema_type, values):
         name = field["name"]
         if name in generator.skip_fields(schema_type):
             continue
+        if field["type"] == "list":
+            bench = "fermentation" if schema_type.startswith("fermentation_") else "grill"
+            descriptors.append({
+                "name": name, "label": "Ingredients", "required": field["required"],
+                "widget": "ingredients", "inherited": field.get("group") != schema_type,
+                "choices": formulas.INGREDIENT_CHOICES[bench],
+                "units": ["g", "ml", "tbsp", "tsp", "clove", "whole"],
+                "slot_values": [
+                    {"name": values.get(f"ingredient_name_{i}", ""),
+                     "qty": values.get(f"ingredient_qty_{i}", ""),
+                     "unit": values.get(f"ingredient_unit_{i}", "")}
+                    for i in range(generator.INGREDIENT_SLOTS)
+                ],
+            })
+            continue
         hint = _field_hint(name, schema_type)
         enum = field.get("enum")
         if enum:

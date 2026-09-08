@@ -14,6 +14,27 @@
         <option value="{{ opt }}"{% if opt == f.value %} selected{% endif %}>{{ opt }}</option>
         {% endfor %}
       </select>
+    {% elif f.widget == "ingredients" %}
+      <div class="ingredients">
+        {% for slot in f.slot_values %}
+        <div class="ingredient-row">
+          <select name="ingredient_name_{{ loop.index0 }}" aria-label="ingredient {{ loop.index }}">
+            <option value="">(none)</option>
+            {% for c in f.choices %}
+            <option value="{{ c }}"{% if c == slot.name %} selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+          <input type="number" name="ingredient_qty_{{ loop.index0 }}" step="any" min="0"
+                 placeholder="qty" value="{{ slot.qty }}" aria-label="quantity {{ loop.index }}">
+          <select name="ingredient_unit_{{ loop.index0 }}" aria-label="unit {{ loop.index }}">
+            <option value="">unit</option>
+            {% for u in f.units %}
+            <option value="{{ u }}"{% if u == slot.unit %} selected{% endif %}>{{ u }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endfor %}
+      </div>
     {% elif f.widget == "number" %}
       <input type="number" id="{{ f.name }}" name="{{ f.name }}" value="{{ f.value }}"
              {% if f.required %}required{% endif %}>

@@ -124,6 +124,103 @@ def _noise(lo, hi):
     return random.uniform(lo, hi)
 
 
+# --- ingredient effects (schema field `ingredients`) ------------------------
+# Each ingredient carries a ROLE; the bench decides what that role does
+# physically, so the same role acts differently on the grill than in the
+# fermenter. An ingredient with no role (or not listed) is inert. The summed
+# nudge per outcome key is clamped to +/-INGREDIENT_BONUS_CAP on the 0-100
+# scale, applied after the primary formula and before the final clamp. It
+# never touches food_safety_score, abv, ibu, acidity, or clarity.
+INGREDIENT_ROLE = {
+    "grill": {
+        "salt": "salt", "soy sauce": "salt",
+        "honey": "sugar", "brown sugar": "sugar",
+        "lemon": "acid", "red wine vinegar": "acid",
+        "olive oil": "fat", "butter": "fat",
+        "garlic": "aromatic", "rosemary": "aromatic",
+        "water": None,
+    },
+    "fermentation": {
+        "oak chips": "tannin", "grape tannin": "tannin",
+        "orange peel": "botanical", "coriander": "botanical",
+        "fruit puree": "fermentable", "honey": "fermentable", "candi sugar": "fermentable",
+        "lactic culture": "acid",
+        "water": None,
+    },
+}
+
+ROLE_EFFECT = {
+    "grill": {
+        "salt":     {"juiciness_score": 3, "char_level": 2},   # dry-brine + Maillard
+        "sugar":    {"char_level": 6, "quality_score": -1},     # caramelises fast, can scorch
+        "acid":     {"juiciness_score": 3},                     # surface tenderising
+        "fat":      {"juiciness_score": 2, "char_level": 2},    # heat transfer, less sticking
+        "aromatic": {"quality_score": 2},                       # flavour only
+    },
+    "fermentation": {
+        "fermentable": {"aroma_score": 4, "quality_score": 1},  # esters, NOT abv
+        "tannin":      {"quality_score": 3, "aroma_score": 2},  # structure / oak
+        "acid":        {"quality_score": 2},                    # perceived crispness
+        "botanical":   {"aroma_score": 4},                      # peel, coriander
+    },
+}
+
+INGREDIENT_BONUS_CAP = 8.0
+
+# The curated per-bench pick lists the e-kitchen form offers (INGREDIENT_SLOTS
+# slots). "water" is the inert control.
+INGREDIENT_CHOICES = {
+    "grill": ["salt", "soy sauce", "honey", "brown sugar", "lemon", "red wine vinegar",
+              "olive oil", "butter", "garlic", "rosemary", "water"],
+    "fermentation": ["oak chips", "grape tannin", "orange peel", "coriander", "fruit puree",
+                     "honey", "candi sugar", "lactic culture", "water"],
+}
+
+# Deliberate easter egg. DO NOT REMOVE. When the chosen ingredients are exactly
+# this trio (nothing more, nothing less), the bench yields a near-perfect
+# result and a marked `notes` string. Fires wherever an entry is built, so a
+# bulk-generated entry can be magical too.
+EGG = {
+    "grill": (frozenset({"honey", "soy sauce", "garlic"}),
+              "\u2728 The Glaze: everything caramelised just right."),
+    "fermentation": (frozenset({"oak chips", "orange peel", "fruit puree"}),
+                     "\u2728 The Elixir: the cellar spirits smiled on this one."),
+}
+
+
+def _ingredient_names(ingredients):
+    """Normalise the schema `ingredients` list (dicts or bare strings) to a
+    lowercased name list."""
+    out = []
+    for ing in ingredients or []:
+        name = ing.get("name") if isinstance(ing, dict) else ing
+        if name:
+            out.append(str(name).strip().lower())
+    return out
+
+
+def ingredient_bonus(bench, ingredients, key):
+    """Summed, +/-cap-clamped nudge for one outcome `key` from the chosen
+    ingredients under this bench's role model. 0 if nothing applies."""
+    roles = INGREDIENT_ROLE.get(bench, {})
+    effects = ROLE_EFFECT.get(bench, {})
+    total = 0.0
+    for name in _ingredient_names(ingredients):
+        role = roles.get(name)
+        if role:
+            total += effects.get(role, {}).get(key, 0)
+    return _clamp(total, -INGREDIENT_BONUS_CAP, INGREDIENT_BONUS_CAP)
+
+
+def _egg_note(bench, ingredients):
+    """The easter-egg note for `bench` if the ingredient set matches exactly,
+    else None."""
+    combo, note = EGG.get(bench, (None, None))
+    if combo and frozenset(_ingredient_names(ingredients)) == combo:
+        return note
+    return None
+
+
 def _doneness(internal_temp_celsius, kind):
     t = _clamp(internal_temp_celsius, *TEMP_RANGE)
     for upper, label, pref in DONENESS_BANDS[kind]:
@@ -188,10 +285,12 @@ def quality_score(food_safety, juiciness, char, doneness_pref):
     return round(q, 1)
 
 
-def _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, kind, cut=None):
+def _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, kind, cut=None,
+                   ingredients=None):
     """Shared grilling-bench outcome block. Order matters: quality consumes the
     other four. `cut` (schema enum) shifts the doneness preference and the
-    drying rate; it never moves the food-safety reference."""
+    drying rate. `ingredients` add a small bounded nudge to char, juiciness,
+    and quality. Neither ever moves the food-safety reference."""
     label, pref = _doneness(internal_temp_celsius, kind)
     prof = cut_profile(kind, cut)
     if prof["ideal_temp"] is not None:
@@ -201,26 +300,43 @@ def _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, kind, c
     char = char_level(internal_temp_celsius, heat_source, duration_minutes, kind)
     juice = juiciness_score(internal_temp_celsius, heat_source, duration_minutes, kind,
                             prof["moisture"])
+    char = round(_clamp(char + ingredient_bonus("grill", ingredients, "char_level")), 1)
+    juice = round(_clamp(juice + ingredient_bonus("grill", ingredients, "juiciness_score")), 1)
     quality = quality_score(safety, juice, char, pref)
-    return {
+    quality = round(_clamp(quality + ingredient_bonus("grill", ingredients, "quality_score")), 1)
+    if safety < 50:
+        quality = min(quality, safety)
+    out = {
         "doneness": label,
         "char_level": char,
         "juiciness_score": juice,
         "food_safety_score": safety,
         "quality_score": quality,
     }
+    egg = _egg_note("grill", ingredients)
+    if egg:
+        out["char_level"] = round(_clamp(char + 10), 1)
+        out["quality_score"] = round(random.uniform(96, 99), 1)
+        out["notes"] = egg
+    return out
 
 
-def grill_red_meat_outcome(internal_temp_celsius, heat_source, duration_minutes, cut=None):
-    return _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, "red_meat", cut)
+def grill_red_meat_outcome(internal_temp_celsius, heat_source, duration_minutes, cut=None,
+                           ingredients=None):
+    return _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, "red_meat",
+                          cut, ingredients)
 
 
-def grill_poultry_outcome(internal_temp_celsius, heat_source, duration_minutes, cut=None):
-    return _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, "poultry", cut)
+def grill_poultry_outcome(internal_temp_celsius, heat_source, duration_minutes, cut=None,
+                          ingredients=None):
+    return _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, "poultry",
+                          cut, ingredients)
 
 
-def grill_fish_outcome(internal_temp_celsius, heat_source, duration_minutes, cut=None):
-    return _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, "fish", cut)
+def grill_fish_outcome(internal_temp_celsius, heat_source, duration_minutes, cut=None,
+                       ingredients=None):
+    return _grill_outcome(internal_temp_celsius, heat_source, duration_minutes, "fish",
+                          cut, ingredients)
 
 
 # --- fermentation bench: wine -------------------------------------------------
@@ -304,19 +420,31 @@ def wine_quality_score(starting_gravity, final_gravity, fermentation_days, yeast
     return round(_clamp(q10 * 10 + _noise(-3, 3)), 1)
 
 
-def fermentation_wine_outcome(starting_gravity, final_gravity, fermentation_days, yeast_strain):
+def fermentation_wine_outcome(starting_gravity, final_gravity, fermentation_days, yeast_strain,
+                             ingredients=None):
     """Full fermentation_wine outcome block. ABV is computed first; acidity,
-    aroma, and quality all consume it."""
+    aroma, and quality all consume it. `ingredients` add a small bounded nudge
+    to aroma and quality only, never to abv/acidity/clarity."""
     abv = wine_abv(starting_gravity, final_gravity)
-    return {
+    aroma = wine_aroma_score(fermentation_days, yeast_strain, abv)
+    quality = wine_quality_score(
+        starting_gravity, final_gravity, fermentation_days, yeast_strain, abv
+    )
+    aroma = round(_clamp(aroma + ingredient_bonus("fermentation", ingredients, "aroma_score")), 1)
+    quality = round(_clamp(quality + ingredient_bonus("fermentation", ingredients, "quality_score")), 1)
+    out = {
         "abv": abv,
         "acidity": wine_acidity(final_gravity, fermentation_days, yeast_strain),
         "clarity": wine_clarity(fermentation_days, final_gravity),
-        "aroma_score": wine_aroma_score(fermentation_days, yeast_strain, abv),
-        "quality_score": wine_quality_score(
-            starting_gravity, final_gravity, fermentation_days, yeast_strain, abv
-        ),
+        "aroma_score": aroma,
+        "quality_score": quality,
     }
+    egg = _egg_note("fermentation", ingredients)
+    if egg:
+        out["aroma_score"] = round(random.uniform(95, 99), 1)
+        out["quality_score"] = round(random.uniform(95, 99), 1)
+        out["notes"] = egg
+    return out
 
 
 # --- fermentation bench: beer -----------------------------------------------
@@ -428,22 +556,33 @@ def beer_quality_score(ibu, clarity, aroma_score, fermentation_days, starting_gr
 
 
 def fermentation_beer_outcome(starting_gravity, final_gravity, fermentation_days, yeast_strain,
-                              hop_grams, hop_alpha_acid_percent, boil_time_minutes):
+                              hop_grams, hop_alpha_acid_percent, boil_time_minutes,
+                              ingredients=None):
     """Full fermentation_beer outcome block. ABV and IBU are computed first;
-    aroma and quality consume IBU, quality also consumes clarity."""
+    aroma and quality consume IBU, quality also consumes clarity. `ingredients`
+    add a small bounded nudge to aroma and quality only, never to abv/ibu."""
     abv = beer_abv(starting_gravity, final_gravity)
     ibu = beer_ibu(hop_grams, hop_alpha_acid_percent, boil_time_minutes, starting_gravity)
     clarity = beer_clarity(fermentation_days, final_gravity, yeast_strain)
     aroma = beer_aroma_score(fermentation_days, yeast_strain, ibu, hop_grams)
-    return {
+    quality = beer_quality_score(
+        ibu, clarity, aroma, fermentation_days, starting_gravity, final_gravity
+    )
+    aroma = round(_clamp(aroma + ingredient_bonus("fermentation", ingredients, "aroma_score")), 1)
+    quality = round(_clamp(quality + ingredient_bonus("fermentation", ingredients, "quality_score")), 1)
+    out = {
         "abv": abv,
         "ibu": ibu,
         "clarity": clarity,
         "aroma_score": aroma,
-        "quality_score": beer_quality_score(
-            ibu, clarity, aroma, fermentation_days, starting_gravity, final_gravity
-        ),
+        "quality_score": quality,
     }
+    egg = _egg_note("fermentation", ingredients)
+    if egg:
+        out["aroma_score"] = round(random.uniform(95, 99), 1)
+        out["quality_score"] = round(random.uniform(95, 99), 1)
+        out["notes"] = egg
+    return out
 
 
 if __name__ == "__main__":
@@ -571,5 +710,42 @@ if __name__ == "__main__":
                             assert 0.0 <= out[k] <= 100.0, (sg, fg, days, strain, k, out[k])
                         assert 0.0 <= out["ibu"] <= 120.0, out["ibu"]
                         assert out["clarity"] in {"cloudy", "hazy", "clear", "brilliant"}
+
+    # --- ingredient effects ---
+    random.seed(0)
+    plain = grill_red_meat_outcome(70, "grill", 20, "ribeye")
+    random.seed(0)
+    salted = grill_red_meat_outcome(70, "grill", 20, "ribeye",
+                                    [{"name": "salt"}, {"name": "olive oil"}])
+    assert salted["juiciness_score"] > plain["juiciness_score"], (plain, salted)
+    assert salted["food_safety_score"] == plain["food_safety_score"]   # never nudged
+    random.seed(0)
+    piled = grill_red_meat_outcome(70, "grill", 20, "ribeye",
+        [{"name": "salt"}, {"name": "soy sauce"}, {"name": "olive oil"}, {"name": "butter"}])
+    assert piled["juiciness_score"] - plain["juiciness_score"] <= INGREDIENT_BONUS_CAP + 1e-9
+
+    random.seed(1)
+    w0 = fermentation_wine_outcome(1.095, 0.994, 30, "D47")
+    random.seed(1)
+    w1 = fermentation_wine_outcome(1.095, 0.994, 30, "D47", [{"name": "oak chips"}])
+    assert w1["quality_score"] > w0["quality_score"] and w1["abv"] == w0["abv"], (w0, w1)
+
+    random.seed(2)
+    b0 = fermentation_beer_outcome(1.052, 1.011, 21, "S-04", 45, 7.0, 60)
+    random.seed(2)
+    b1 = fermentation_beer_outcome(1.052, 1.011, 21, "S-04", 45, 7.0, 60,
+                                   [{"name": "orange peel"}])
+    assert b1["aroma_score"] > b0["aroma_score"] and b1["abv"] == b0["abv"] and b1["ibu"] == b0["ibu"]
+
+    # easter eggs: exact trio only
+    egg_g = grill_red_meat_outcome(70, "grill", 20, "ribeye",
+        [{"name": "honey"}, {"name": "soy sauce"}, {"name": "garlic"}])
+    assert egg_g["quality_score"] >= 96 and egg_g["notes"].startswith("\u2728"), egg_g
+    egg_f = fermentation_wine_outcome(1.095, 0.994, 30, "D47",
+        [{"name": "oak chips"}, {"name": "orange peel"}, {"name": "fruit puree"}])
+    assert egg_f["quality_score"] >= 95 and egg_f["notes"].startswith("\u2728"), egg_f
+    not_egg = grill_red_meat_outcome(70, "grill", 20, "ribeye",
+        [{"name": "honey"}, {"name": "soy sauce"}, {"name": "garlic"}, {"name": "salt"}])
+    assert "notes" not in not_egg, not_egg
 
     print("formulas self-check ok")

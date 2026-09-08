@@ -9,9 +9,12 @@ without a code change here (it just won't get a bespoke `outcome`).
 from engine import formulas
 
 # Fields the wired forms never collect. `outcome` is computed here;
-# `ingredients` is a list type with no simple widget; `temperature_celsius` is a
-# base_recipe_attempt optional that no wired formula reads.
-SKIP_FIELDS = {"outcome", "ingredients", "temperature_celsius"}
+# `temperature_celsius` is a base_recipe_attempt optional no wired formula
+# reads. `ingredients` IS collected now (fixed slots, see _ingredients_from_form).
+SKIP_FIELDS = {"outcome", "temperature_celsius"}
+
+# How many ingredient rows the e-kitchen form offers.
+INGREDIENT_SLOTS = 4
 
 # `duration_minutes` is real input for grilling (it drives char and juiciness)
 # but meaningless on a fermentation form, where ferment length is
@@ -28,20 +31,24 @@ def skip_fields(schema_type):
 # schema_type -> function(data dict) -> outcome dict
 OUTCOME_FORMULAS = {
     "grill_red_meat": lambda d: formulas.grill_red_meat_outcome(
-        d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20), d.get("cut")
+        d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20),
+        d.get("cut"), d.get("ingredients")
     ),
     "grill_poultry": lambda d: formulas.grill_poultry_outcome(
-        d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20), d.get("cut")
+        d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20),
+        d.get("cut"), d.get("ingredients")
     ),
     "grill_fish": lambda d: formulas.grill_fish_outcome(
-        d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20), d.get("cut")
+        d["internal_temp_celsius"], d["heat_source"], d.get("duration_minutes", 20),
+        d.get("cut"), d.get("ingredients")
     ),
     "fermentation_wine": lambda d: formulas.fermentation_wine_outcome(
-        d["starting_gravity"], d["final_gravity"], d["fermentation_days"], d["yeast_strain"]
+        d["starting_gravity"], d["final_gravity"], d["fermentation_days"], d["yeast_strain"],
+        d.get("ingredients")
     ),
     "fermentation_beer": lambda d: formulas.fermentation_beer_outcome(
         d["starting_gravity"], d["final_gravity"], d["fermentation_days"], d["yeast_strain"],
-        d["hop_grams"], d["hop_alpha_acid_percent"], d["boil_time_minutes"]
+        d["hop_grams"], d["hop_alpha_acid_percent"], d["boil_time_minutes"], d.get("ingredients")
     ),
 }
 
@@ -50,6 +57,29 @@ def _coerce(value, field_type):
     if field_type == "number":
         return float(value)
     return str(value)
+
+
+def _ingredients_from_form(form):
+    """Gather the fixed ingredient slots (ingredient_name_i / _qty_i / _unit_i)
+    into the schema list-of-{name,quantity,unit} shape. Rows with a blank name
+    are dropped; quantity/unit are optional per row."""
+    rows = []
+    for i in range(INGREDIENT_SLOTS):
+        name = (form.get(f"ingredient_name_{i}") or "").strip()
+        if not name:
+            continue
+        row = {"name": name}
+        qty = (form.get(f"ingredient_qty_{i}") or "").strip()
+        if qty:
+            try:
+                row["quantity"] = float(qty)
+            except ValueError:
+                pass
+        unit = (form.get(f"ingredient_unit_{i}") or "").strip()
+        if unit:
+            row["unit"] = unit
+        rows.append(row)
+    return rows
 
 
 def build_entry(schema_type, schema_fields, form, nickname):
@@ -64,6 +94,13 @@ def build_entry(schema_type, schema_fields, form, nickname):
     for field in schema_fields:
         name = field["name"]
         if name in skip:
+            continue
+        if field["type"] == "list":
+            rows = _ingredients_from_form(form)
+            if rows:
+                data[name] = rows
+            elif field["required"]:
+                raise ValueError(f"missing required field: {name}")
             continue
         raw = form.get(name, "")
         if raw == "" or raw is None:
@@ -183,6 +220,18 @@ if __name__ == "__main__":
         "abv", "ibu", "clarity", "aroma_score", "quality_score"
     }
     assert beer["title"] == "German beer, 21-day ferment (brewer)", beer["title"]
+
+    # ingredients: fixed slots -> list; a role nudge lands; the trio fires the egg
+    ing_fields = fields + [{"name": "ingredients", "type": "list", "required": False}]
+    ing_form = {**form, "ingredient_name_0": "salt", "ingredient_qty_0": "5",
+                "ingredient_unit_0": "g", "ingredient_name_1": "garlic"}
+    e_ing = build_entry("grill_red_meat", ing_fields, ing_form, "t")
+    assert e_ing["data"]["ingredients"] == [
+        {"name": "salt", "quantity": 5.0, "unit": "g"}, {"name": "garlic"}], e_ing["data"]["ingredients"]
+    egg_form = {**form, "ingredient_name_0": "honey", "ingredient_name_1": "soy sauce",
+                "ingredient_name_2": "garlic"}
+    e_egg = build_entry("grill_red_meat", ing_fields, egg_form, "t")
+    assert e_egg["data"]["outcome"].get("notes", "").startswith("\u2728"), e_egg["data"]["outcome"]
 
     print("generator self-check ok:", entry["title"], "|", wine["title"], "|",
           beer["title"], beer["data"]["outcome"])

@@ -67,6 +67,9 @@
     background: #fff; color: var(--ink); }
   input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   input[type=range] { width: 100%; accent-color: var(--accent-tint); }
+  .ingredient-row { display: flex; gap: 8px; margin-bottom: 6px; }
+  .ingredient-row select:first-child { flex: 2; }
+  .ingredient-row input, .ingredient-row select { flex: 1; min-width: 0; }
   .rangeval { display: block; text-align: right; margin-top: 2px; font-family: var(--mono);
     font-size: 13px; color: var(--accent-tint); }
 
