@@ -87,6 +87,30 @@ def post_entry(schema_type, title, submitted_by, data):
     return r.json()
 
 
+def list_entries(schema_type=None, limit=500):
+    """A page of entries (Nexus caps limit at 500), optionally one
+    schema_type. For the operator CLI."""
+    params = {"limit": limit}
+    if schema_type:
+        params["schema_type"] = schema_type
+    try:
+        r = httpx.get(f"{OASIS_URL}/entries", params=params, timeout=TIMEOUT)
+        r.raise_for_status()
+        return r.json()
+    except httpx.HTTPError as e:
+        raise OasisUnavailable(f"GET {OASIS_URL}/entries failed: {e}") from e
+
+
+def delete_entry(entry_id):
+    """Delete one entry. 404 is treated as already gone."""
+    try:
+        r = httpx.delete(f"{OASIS_URL}/entries/{entry_id}", timeout=TIMEOUT)
+    except httpx.HTTPError as e:
+        raise OasisUnavailable(f"DELETE {OASIS_URL}/entries/{entry_id} failed: {e}") from e
+    if r.status_code not in (204, 404):
+        raise OasisUnavailable(f"Nexus refused the delete ({r.status_code}): {r.text}")
+
+
 def entry_url(entry_id):
     """Where a visitor can see the pushed entry. Nexus has no explorer
     UI yet, so this points at the raw JSON endpoint; swap when one exists."""

@@ -6,6 +6,8 @@ Generic on purpose: a field the schema declares but no formula knows about is
 still copied through, so a new config-only bench in Nexus can be pushed
 without a code change here (it just won't get a bespoke `outcome`).
 """
+import random
+
 from engine import formulas
 
 # Fields the wired forms never collect. `outcome` is computed here;
@@ -121,6 +123,69 @@ def build_entry(schema_type, schema_fields, form, nickname):
     }
 
 
+# Plausible sub-ranges for random_form. Tighter than the formula clamp
+# ranges: seeded data should look realistic and give the analysis charts
+# signal, not sit at the extremes.
+_CUISINES = ["Italian", "Japanese", "Mexican", "Indian", "French", "Thai",
+             "Greek", "Korean", "Argentine", "American", "Turkish"]
+
+
+def _random_numeric_range(schema_type, name):
+    if name == "internal_temp_celsius":
+        safe = formulas.SAFE_TEMP.get(schema_type.removeprefix("grill_"), 63.0)
+        return (safe - 8.0, safe + 22.0)   # straddles the safety line
+    if name in ("starting_gravity", "final_gravity"):
+        if schema_type == "fermentation_wine":
+            return {"starting_gravity": (1.080, 1.110),
+                    "final_gravity": (0.990, 1.004)}[name]
+        return {"starting_gravity": (1.040, 1.075),
+                "final_gravity": (1.006, 1.018)}[name]
+    return {
+        "duration_minutes": (8.0, 45.0),
+        "fermentation_days": (7.0, 45.0),
+        "hop_grams": (15.0, 120.0),
+        "hop_alpha_acid_percent": (3.0, 14.0),
+        "boil_time_minutes": (20.0, 90.0),
+    }.get(name, (1.0, 100.0))
+
+
+def random_form(schema_type, schema_fields):
+    """A plausible random form dict (all string values, flat keys) for a
+    wired schema_type. Same shape the web form submits, so build_entry
+    consumes it unchanged. Enums come from the schema; numeric ranges from
+    _random_numeric_range; ingredients from the bench's curated list."""
+    bench = "fermentation" if schema_type.startswith("fermentation_") else "grill"
+    skip = skip_fields(schema_type)
+    form = {}
+    for field in schema_fields:
+        name = field["name"]
+        if name == "outcome" or name in skip:
+            continue
+        if field["type"] == "list":
+            choices = formulas.INGREDIENT_CHOICES[bench]
+            for i, ing in enumerate(random.sample(choices, random.randint(0, 3))):
+                form[f"ingredient_name_{i}"] = ing
+                form[f"ingredient_qty_{i}"] = str(round(random.uniform(1, 200), 1))
+                form[f"ingredient_unit_{i}"] = random.choice(["g", "ml", "tbsp", "tsp"])
+            continue
+        if field.get("enum"):
+            form[name] = random.choice(field["enum"])
+            continue
+        if name == "cuisine":
+            form[name] = random.choice(_CUISINES)
+            continue
+        if name == "cooking_method":
+            form[name] = "fermenting" if bench == "fermentation" else "grilling"
+            continue
+        if field["type"] == "number":
+            lo, hi = _random_numeric_range(schema_type, name)
+            digits = 3 if "gravity" in name else 1
+            form[name] = str(round(random.uniform(lo, hi), digits))
+            continue
+        # a required string field with no rule would fail loudly in build_entry
+    return form
+
+
 def _title(schema_type, data, nickname):
     who = f" ({nickname})" if nickname else ""
     cuisine = data.get("cuisine", "unspecified")
@@ -232,6 +297,37 @@ if __name__ == "__main__":
                 "ingredient_name_2": "garlic"}
     e_egg = build_entry("grill_red_meat", ing_fields, egg_form, "t")
     assert e_egg["data"]["outcome"].get("notes", "").startswith("\u2728"), e_egg["data"]["outcome"]
+
+    # random_form: every wired type produces a form build_entry accepts,
+    # with an outcome and all required fields present
+    random.seed(0)
+
+    def _with_enums(flds):
+        # the live /schemas carries these enums; the fixtures above omit them
+        e = {"heat_source": ["grill", "pan", "oven"],
+             "cut": ["ribeye", "sirloin", "flank"],
+             "yeast_strain": ["EC-1118", "D47"]}
+        return [{**f, "enum": e[f["name"]]} if f["name"] in e else f for f in flds]
+
+    _ing = [{"name": "ingredients", "type": "list", "required": False}]
+    _schema_fields = {
+        "grill_red_meat": _with_enums(ing_fields),
+        "fermentation_wine": _with_enums(wine_fields + _ing),
+        "fermentation_beer": _with_enums(beer_fields + _ing),
+    }
+    for _st, _flds in _schema_fields.items():
+        _form = random_form(_st, _flds)
+        _e = build_entry(_st, _flds, _form, "seeder")
+        assert _e["data"].get("outcome"), (_st, _e)
+        for _f in _flds:
+            if _f["required"]:
+                assert _f["name"] in _e["data"], (_st, _f["name"], _e["data"])
+        assert "abv" not in _e["data"]["outcome"] or _e["data"]["outcome"]["abv"] >= 0
+    # a few draws should occasionally include ingredients
+    _with_ing = sum(1 for _ in range(30)
+                    if any(k.startswith("ingredient_name_")
+                           for k in random_form("grill_fish", ing_fields)))
+    assert _with_ing > 0, "random_form never produced ingredients in 30 draws"
 
     print("generator self-check ok:", entry["title"], "|", wine["title"], "|",
           beer["title"], beer["data"]["outcome"])
